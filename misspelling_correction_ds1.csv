@@ -270,6 +270,7 @@ palyer,player,,
 plaing,playing,,
 playin,playing,,
 playying,playing,,
+ps2,PlayStation 2,,game console
 probaply,probably,,
 prohibitionera,prohibition era,,
 protaganist,protagonist,,
@@ -400,6 +401,9 @@ uu,you,,
 youre,you are,,
 youve,you have,,
 zootsuit,zoot suit,,outfit style
+predo,,,*REMOVE (unfinished word)
+ver,,,*REMOVE (unfinished word)
+vi,,,*REMOVE (unfinished word)
 ,,gras,"""Mardi Gras"" [leave as is]"
 ,,cafe,[leave as is]
 ,,cardio,[leave as is]
@@ -430,9 +434,6 @@ zootsuit,zoot suit,,outfit style
 ,,themself,[leave as is]
 ,,zainy,[leave as is]
 ,,mothership,[leave as it]
-,,predo,*REMOVE (unfinished word)
-,,ver,*REMOVE (unfinished word)
-,,vi,*REMOVE (unfinished word)
 ,,dat,a Truth or Dare card game
 ,,app,abrv of application
 ,,statham,actor
@@ -487,13 +488,7 @@ zootsuit,zoot suit,,outfit style
 ,,der,"from Call of Duty map ""Kino der Toten"""
 ,,bakugan,game
 ,,ds,game console
-,,ps2,game console
 ,,xbox,game console
-,,pokemon,game franchise
-,,platformer,game style
-,,platformers,game style
-,,rpg,game style
-,,scroller,game style
 ,,turismo,Gran Turismo
 ,,hq,HQ = Head Quarters
 ,,mechanoid,human-like robot
@@ -586,6 +581,11 @@ zootsuit,zoot suit,,outfit style
 ,,tetris,video game
 ,,undertale,video game
 ,,yakuza,video game
+,,pokemon,video game franchise
+,,platformer,video game style
+,,platformers,video game style
+,,rpg,video game style
+,,scroller,video game style
 ,,kazooie,"video game, ""Banjo-Kazooie"""
 ,,bioshock,"video game, BioShock"
 ,,gta,"video game, GTA = Grand Theft Auto"
