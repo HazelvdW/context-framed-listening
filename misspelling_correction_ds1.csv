@@ -1,8 +1,9 @@
-1000,1000 dollars,,
+misspelling,correction,determined_correct,NOTES:
+1000,1000 dollars,,"""$"""
 13rd,13th,,
-1416,14 to 16,,
-1520,15 to 20,,
-19001940,1900 1940,,
+1416,14 to 16,,"""-"""
+1520,15 to 20,,"""-"""
+19001940,1900 1940,,"""-"""
 1920s30,1920s 1930s,,
 19601970s,1960s 1970s,,
 1970s1980s,1970s 1908s,,
@@ -85,7 +86,6 @@ comingofage,coming of age,,
 concertclub,concert club,,
 concertsfunctions,concerts functions,,
 counsole,console,,"""playing a mario related game on a ""counsole"""
-misspelling,correction,determined_correct,NOTES:
 coridoor,corridor,,
 coud,could,,
 couldnt,could not,,
