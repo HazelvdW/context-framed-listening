@@ -1,0 +1,5 @@
+comparison,mean1,mean2,diff,t,p,sig,d,n1,n2
+"Same Music, Diff Context vs Diff Music, Same Context",0.9548842310905457,0.9332832,0.021601021,9.551430329358547,3.663730250999283e-20,***,1.1874468100159623,96,480
+"Different everything, Same Genre vs Different everything, Different Genre",0.9358139038085938,0.92221016,0.013603747,8.902888532037762,1.6027833034710515e-18,***,0.6119029571224668,288,1152
+"Same Context & Same Clip vs Same Context, Diff Clip",,0.9332832,,,,n.s.,,0,480
+"Same Clip & Same Context vs Same Clip, Diff Context",,0.95488423,,,,n.s.,,0,96
