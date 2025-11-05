@@ -228,6 +228,12 @@ def create_genre_context_wordclouds(
     
     fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
     
+    # Normalize axes to a 2D array so indexing with [i, j] always works
+    if len(genres) == 1 and len(contexts) == 1:
+        axes = np.array([[axes]])
+    else:
+        axes = np.atleast_2d(axes)
+    
     for i, genre in enumerate(genres):
         for j, context in enumerate(contexts):
             ax = axes[i, j]
@@ -240,7 +246,8 @@ def create_genre_context_wordclouds(
                 continue
             
             # Get mean TF-IDF scores for this combination
-            subset_tfidf = tfidf_scores_df[mask]
+            # Use positional boolean indexing to avoid alignment-by-index issues
+            subset_tfidf = tfidf_scores_df.iloc[mask.values]
             mean_tfidf = subset_tfidf.mean(axis=0)
             
             # Get top words
