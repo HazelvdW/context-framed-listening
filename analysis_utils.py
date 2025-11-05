@@ -2257,5 +2257,4 @@ def generate_all_visualizations(
         print("="*70)
 
 
-
 # End of file
