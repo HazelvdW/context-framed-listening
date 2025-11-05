@@ -20,7 +20,7 @@ Import the module at the top of each notebook:
     from analysis_utils import (
         extract_similarity_by_condition,
         run_factor_analysis,
-        create_comparative_music_vs_context_figure,
+        create_comparative_clip_vs_context_figure,
         ...
     )
 
@@ -36,6 +36,8 @@ from typing import Optional, Tuple, Dict, List, Any
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import TruncatedSVD
+from sklearn.manifold import TSNE
 from scipy import stats
 from scipy.stats import levene
 import matplotlib.pyplot as plt
@@ -147,7 +149,7 @@ def extract_similarity_by_condition(
             if same_clip and same_context:
                 condition = "same_clip_same_context"
             elif same_clip and not same_context:
-                condition = "same_clip_diff_context"  # isolated MUSIC influence
+                condition = "same_clip_diff_context"  # isolated CLIP influence
             elif not same_clip and same_context:
                 condition = "diff_clip_same_context"  # isolated CONTEXT influence
             else:
@@ -344,7 +346,7 @@ def analyze_within_factor_similarity(
         print(f"\n1. WITHIN-{factor_name.upper()} SIMILARITY")
         print("-" * 70)
         if factor_name == 'Context':
-            print("When different music is heard with the same context, how similar are thoughts?")
+            print("When different clip is heard with the same context, how similar are thoughts?")
         else:
             print("When different clips from the same genre are heard, how similar are thoughts?")
 
@@ -493,7 +495,7 @@ def analyze_pairwise_factor_comparisons(
     return pairs_df
 
 
-def analyze_factor_music_vs_context(
+def analyze_factor_clip_vs_context(
     sim_df: pd.DataFrame,
     metadata: pd.DataFrame,
     factor_column: str,
@@ -501,9 +503,9 @@ def analyze_factor_music_vs_context(
     verbose: bool = True
 ) -> pd.DataFrame:
     """
-    Compare music-driven vs. context-driven effects within each factor level.
+    Compare clip-driven vs. context-driven effects within each factor level.
 
-    For Context: Uses OR logic for music-driven (captures cross-context comparisons)
+    For Context: Uses OR logic for clip-driven (captures cross-context comparisons)
     For Genre: Uses AND logic for both (pure within-genre comparisons)
 
     Parameters
@@ -525,14 +527,14 @@ def analyze_factor_music_vs_context(
         Comparison statistics for each factor level
     """
     if verbose:
-        print(f"\n\n3. {factor_name.upper()}-SPECIFIC COMPARISON: Music vs. Context Effects")
+        print(f"\n\n3. {factor_name.upper()}-SPECIFIC COMPARISON: Clip vs. Context Effects")
         print("-" * 70)
         print(f"For each {factor_name.lower()}, comparing:")
-        print("  - Music-driven similarity: same clip heard in DIFFERENT contexts")
+        print("  - Clip-driven similarity: same clip heard in DIFFERENT contexts")
         print("  - Context-driven similarity: DIFFERENT clips heard in the same context")
 
         if factor_name == 'Context':
-            print("\nNote: Music-driven uses OR logic (at least one doc from target context)")
+            print("\nNote: Clip-driven uses OR logic (at least one doc from target context)")
             print("      Context-driven uses AND logic (both docs from target context)\n")
         else:
             print(f"\nNote: Both use AND logic (both docs from target {factor_name.lower()})\n")
@@ -542,20 +544,20 @@ def analyze_factor_music_vs_context(
     factors = metadata[factor_column].unique()
 
     for factor in factors:
-        # MUSIC-DRIVEN filter
+        # CLIP-DRIVEN filter
         if factor_name == 'Context':
-            music_filter = (
+            clip_filter = (
                 (sim_df['condition'] == 'same_clip_diff_context') &
                 ((sim_df[f'{factor_key}_i'] == factor) | (sim_df[f'{factor_key}_j'] == factor))
             )
         else:
-            music_filter = (
+            clip_filter = (
                 (sim_df['condition'] == 'same_clip_diff_context') &
                 (sim_df[f'{factor_key}_i'] == factor) &
                 (sim_df[f'{factor_key}_j'] == factor)
             )
 
-        music_sims = sim_df[music_filter]['similarity']
+        clip_sims = sim_df[clip_filter]['similarity']
 
         # CONTEXT-DRIVEN filter (always AND logic)
         context_filter = (
@@ -565,41 +567,41 @@ def analyze_factor_music_vs_context(
         )
         context_sims = sim_df[context_filter]['similarity']
 
-        if len(music_sims) > 0 and len(context_sims) > 0:
-            t_stat, p_val = stats.ttest_ind(music_sims, context_sims)
-            effect_size = compute_cohens_d(music_sims, context_sims)
+        if len(clip_sims) > 0 and len(context_sims) > 0:
+            t_stat, p_val = stats.ttest_ind(clip_sims, context_sims)
+            effect_size = compute_cohens_d(clip_sims, context_sims)
             sig = get_significance_marker(p_val)
 
             moderator_results.append({
                 factor_name.lower(): factor,
-                'music_mean': music_sims.mean(),
-                'music_sd': music_sims.std(),
+                'clip_mean': clip_sims.mean(),
+                'clip_sd': clip_sims.std(),
                 'context_mean': context_sims.mean(),
                 'context_sd': context_sims.std(),
-                'difference': music_sims.mean() - context_sims.mean(),
+                'difference': clip_sims.mean() - context_sims.mean(),
                 'effect_size': effect_size,
                 't': t_stat,
                 'p': p_val,
                 'sig': sig,
-                'n_music': len(music_sims),
+                'n_clip': len(clip_sims),
                 'n_context': len(context_sims)
             })
 
             if verbose:
                 print(f"\n{factor.upper()}:")
-                print(f"  Music-driven: M={music_sims.mean():.4f}, SD={music_sims.std():.4f} (N={len(music_sims)})")
+                print(f"  Clip-driven: M={clip_sims.mean():.4f}, SD={clip_sims.std():.4f} (N={len(clip_sims)})")
                 print(f"  Context-driven: M={context_sims.mean():.4f}, SD={context_sims.std():.4f} (N={len(context_sims)})")
-                print(f"  Difference: {music_sims.mean() - context_sims.mean():.4f}")
-                print(f"  t({len(music_sims) + len(context_sims) - 2}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
+                print(f"  Difference: {clip_sims.mean() - context_sims.mean():.4f}")
+                print(f"  t({len(clip_sims) + len(context_sims) - 2}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
                 print(f"  Cohen's d = {effect_size:.3f}")
 
                 if sig != "n.s.":
-                    if music_sims.mean() > context_sims.mean():
-                        print(f"  → In {factor}, MUSIC drives similarity MORE than context")
+                    if clip_sims.mean() > context_sims.mean():
+                        print(f"  → In {factor}, CLIP drives similarity MORE than context")
                     else:
-                        print(f"  → In {factor}, CONTEXT drives similarity MORE than music")
+                        print(f"  → In {factor}, CONTEXT drives similarity MORE than clip")
                 else:
-                    print(f"  → In {factor}, music and context have comparable effects")
+                    print(f"  → In {factor}, clip and context have comparable effects")
 
     if len(moderator_results) == 0:
         return pd.DataFrame()
@@ -623,7 +625,7 @@ def _print_moderator_summary(
     print(f"{factor_name.upper()}-SPECIFIC SUMMARY")
     print("-"*70)
 
-    music_dominant = moderator_df[
+    clip_dominant = moderator_df[
         (moderator_df['difference'] > 0) & (moderator_df['sig'] != 'n.s.')
     ]
     context_dominant = moderator_df[
@@ -632,9 +634,9 @@ def _print_moderator_summary(
     no_difference = moderator_df[moderator_df['sig'] == 'n.s.']
 
     print(f"\nAcross {len(moderator_df)} {factor_name.lower()}s:")
-    print(f"  Music-dominant: {len(music_dominant)}")
-    if len(music_dominant) > 0:
-        print(f"    {', '.join(music_dominant[factor_name.lower()].values)}")
+    print(f"  Clip-dominant: {len(clip_dominant)}")
+    if len(clip_dominant) > 0:
+        print(f"    {', '.join(clip_dominant[factor_name.lower()].values)}")
 
     print(f"  Context-dominant: {len(context_dominant)}")
     if len(context_dominant) > 0:
@@ -656,7 +658,7 @@ def analyze_factor_consistency(
     verbose: bool = True
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Analyze consistency (CV) within each factor and compare music vs. context consistency.
+    Analyze consistency (CV) within each factor and compare clip vs. context consistency.
 
     Parameters
     -----------
@@ -675,7 +677,7 @@ def analyze_factor_consistency(
     --------
     Tuple[pd.DataFrame, pd.DataFrame]
         - within_consistency_df: CV for each factor level
-        - music_vs_context_consistency_df: Music vs context consistency comparison
+        - clip_vs_context_consistency_df: Clip vs context consistency comparison
     """
     if verbose:
         print(f"\n{'-'*70}")
@@ -733,15 +735,15 @@ def analyze_factor_consistency(
         print(f"\n→ {consistency_df.iloc[0][factor_name.lower()].upper()} produces MOST CONSISTENT thoughts")
         print(f"→ {consistency_df.iloc[-1][factor_name.lower()].upper()} produces MOST VARIABLE thoughts")
 
-    # Music vs. Context consistency comparison
-    music_vs_context_df = _analyze_music_context_consistency(
+    # Clip vs. Context consistency comparison
+    clip_vs_context_df = _analyze_clip_context_consistency(
         sim_df, metadata, factor_column, factor_name, factor_key, factors, verbose
     )
 
-    return consistency_df, music_vs_context_df
+    return consistency_df, clip_vs_context_df
 
 
-def _analyze_music_context_consistency(
+def _analyze_clip_context_consistency(
     sim_df: pd.DataFrame,
     metadata: pd.DataFrame,
     factor_column: str,
@@ -750,29 +752,29 @@ def _analyze_music_context_consistency(
     factors: np.ndarray,
     verbose: bool
 ) -> pd.DataFrame:
-    """Helper function to analyze music vs context consistency."""
+    """Helper function to analyze clip vs context consistency."""
     if verbose:
-        print(f"\n\nCONSISTENCY COMPARISON: Music vs. Context Effects Within {factor_name}s")
+        print(f"\n\nCONSISTENCY COMPARISON: Clip vs. Context Effects Within {factor_name}s")
         print("-"*70)
         print("Using Levene's test to assess if variance (consistency) differs significantly\n")
 
-    music_vs_context_consistency = []
+    clip_vs_context_consistency = []
 
     for factor in factors:
-        # Music-driven filter
+        # Clip-driven filter
         if factor_name == 'Context':
-            music_filter = (
+            clip_filter = (
                 (sim_df['condition'] == 'same_clip_diff_context') &
                 ((sim_df[f'{factor_key}_i'] == factor) | (sim_df[f'{factor_key}_j'] == factor))
             )
         else:
-            music_filter = (
+            clip_filter = (
                 (sim_df['condition'] == 'same_clip_diff_context') &
                 (sim_df[f'{factor_key}_i'] == factor) &
                 (sim_df[f'{factor_key}_j'] == factor)
             )
 
-        music_sims = sim_df[music_filter]['similarity']
+        clip_sims = sim_df[clip_filter]['similarity']
 
         # Context-driven filter (always AND logic)
         context_filter = (
@@ -782,19 +784,19 @@ def _analyze_music_context_consistency(
         )
         context_sims = sim_df[context_filter]['similarity']
 
-        if len(music_sims) > 0 and len(context_sims) > 0:
-            music_cv = safe_cv(music_sims.std(), music_sims.mean())
+        if len(clip_sims) > 0 and len(context_sims) > 0:
+            clip_cv = safe_cv(clip_sims.std(), clip_sims.mean())
             context_cv = safe_cv(context_sims.std(), context_sims.mean())
-            cv_difference = music_cv - context_cv if not (np.isnan(music_cv) or np.isnan(context_cv)) else np.nan
+            cv_difference = clip_cv - context_cv if not (np.isnan(clip_cv) or np.isnan(context_cv)) else np.nan
 
-            levene_stat, levene_p = levene(music_sims, context_sims)
+            levene_stat, levene_p = levene(clip_sims, context_sims)
             sig = get_significance_marker(levene_p)
 
-            music_vs_context_consistency.append({
+            clip_vs_context_consistency.append({
                 factor_name.lower(): factor,
-                'music_mean': music_sims.mean(),
-                'music_sd': music_sims.std(),
-                'music_cv': music_cv,
+                'clip_mean': clip_sims.mean(),
+                'clip_sd': clip_sims.std(),
+                'clip_cv': clip_cv,
                 'context_mean': context_sims.mean(),
                 'context_sd': context_sims.std(),
                 'context_cv': context_cv,
@@ -802,17 +804,17 @@ def _analyze_music_context_consistency(
                 'levene_stat': levene_stat,
                 'levene_p': levene_p,
                 'sig': sig,
-                'n_music': len(music_sims),
+                'n_clip': len(clip_sims),
                 'n_context': len(context_sims)
             })
 
             if verbose:
                 print(f"\n{factor.upper()}:")
-                print(f"  Music-driven: M={music_sims.mean():.4f}, SD={music_sims.std():.4f}, CV={music_cv:.4f}")
+                print(f"  Clip-driven: M={clip_sims.mean():.4f}, SD={clip_sims.std():.4f}, CV={clip_cv:.4f}")
                 print(f"  Context-driven: M={context_sims.mean():.4f}, SD={context_sims.std():.4f}, CV={context_cv:.4f}")
                 print(f"  Levene's test: F={levene_stat:.3f}, p={levene_p:.4f} {sig}")
 
-    return pd.DataFrame(music_vs_context_consistency)
+    return pd.DataFrame(clip_vs_context_consistency)
 
 
 # ==============================================================================
@@ -834,7 +836,7 @@ def run_factor_analysis(
     This is a high-level wrapper that runs all four analysis steps:
     1. Within-factor similarity
     2. Pairwise comparisons
-    3. Music vs context moderator analysis
+    3. Clip vs context moderator analysis
     4. Consistency analysis
 
     Parameters
@@ -859,9 +861,9 @@ def run_factor_analysis(
     Tuple of DataFrames:
         - within_df: Within-factor analysis results
         - pairs_df: Pairwise comparison results
-        - moderator_df: Music vs context moderator results
+        - moderator_df: Clip vs context moderator results
         - consistency_df: Consistency analysis results
-        - consistency_comparison_df: Music vs context consistency comparison
+        - consistency_comparison_df: Clip vs context consistency comparison
     """
     if verbose:
         print("\n" + "="*70)
@@ -887,7 +889,7 @@ def run_factor_analysis(
         sim_df_docs, METdocs, factor_column, factor_name, within_df, verbose
     )
 
-    moderator_df = analyze_factor_music_vs_context(
+    moderator_df = analyze_factor_clip_vs_context(
         sim_df_docs, METdocs, factor_column, factor_name, verbose
     )
 
@@ -906,13 +908,13 @@ def run_factor_analysis(
 
     if len(moderator_df) > 0:
         moderator_df.to_csv(
-            f'{output_dir}/{model_prefix}_{factor_lower}_moderator_music_vs_context.csv',
+            f'{output_dir}/{model_prefix}_{factor_lower}_moderator_clip_vs_context.csv',
             index=False
         )
 
     if len(consistency_comparison_df) > 0:
         consistency_comparison_df.to_csv(
-            f'{output_dir}/{model_prefix}_{factor_lower}_music_vs_context_consistency.csv',
+            f'{output_dir}/{model_prefix}_{factor_lower}_clip_vs_context_consistency.csv',
             index=False
         )
 
@@ -1099,6 +1101,732 @@ def create_comparative_clip_vs_context_figure(
     return fig
 
 
+def create_comparative_within_factor_figure(
+    context_df: pd.DataFrame,
+    genre_df: pd.DataFrame,
+    output_path: str,
+    figsize: Tuple[int, int] = (16, 12)
+) -> plt.Figure:
+    """
+    Side-by-side comparison of within-factor similarity and consistency.
+    
+    Layout (2x2):
+    A - Context within-factor similarity
+    B - Genre within-factor similarity
+    C - Context consistency (CV)
+    D - Genre consistency (CV)
+    """
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.25)
+
+    context_sorted = context_df.sort_values('mean', ascending=False)
+    genre_sorted = genre_df.sort_values('mean', ascending=False)
+
+    # PANEL A: Context within-factor similarity
+    ax_a = fig.add_subplot(gs[0, 0])
+    context_sorted.plot(kind='bar', x='context', y='mean', yerr='std',
+                        ax=ax_a, capsize=5, color='teal',
+                        edgecolor='black', alpha=0.8, legend=False)
+    ax_a.set_title('A. Within-Context Similarity\n(Same Context, Different Clip)',
+                   fontsize=13, fontweight='bold')
+    ax_a.set_xlabel('')
+    ax_a.set_ylabel('Mean Cosine Similarity', fontsize=11)
+    ax_a.set_xticklabels(context_sorted['context'], rotation=45, ha='right', fontsize=10)
+    ax_a.grid(axis='y', alpha=0.3)
+    ax_a.axhline(y=context_sorted['mean'].mean(), color='red',
+                 linestyle='--', alpha=0.5, linewidth=1.5, label='Overall Mean')
+    ax_a.legend(fontsize=9)
+
+    # PANEL B: Genre within-factor similarity
+    ax_b = fig.add_subplot(gs[0, 1])
+    genre_sorted.plot(kind='bar', x='genre', y='mean', yerr='std',
+                      ax=ax_b, capsize=5, color='mediumpurple',
+                      edgecolor='black', alpha=0.8, legend=False)
+    ax_b.set_title('B. Within-Genre Similarity\n(Same Genre, Different Clips)',
+                   fontsize=13, fontweight='bold')
+    ax_b.set_xlabel('')
+    ax_b.set_ylabel('Mean Cosine Similarity', fontsize=11)
+    ax_b.set_xticklabels(genre_sorted['genre'], rotation=45, ha='right', fontsize=10)
+    ax_b.grid(axis='y', alpha=0.3)
+    ax_b.axhline(y=genre_sorted['mean'].mean(), color='red',
+                 linestyle='--', alpha=0.5, linewidth=1.5, label='Overall Mean')
+    ax_b.legend(fontsize=9)
+
+    # PANEL C: Context consistency (CV)
+    ax_c = fig.add_subplot(gs[1, 0])
+    context_cv_sorted = context_df.sort_values('cv')
+    context_cv_sorted.plot(kind='bar', x='context', y='cv',
+                           ax=ax_c, color='coral',
+                           edgecolor='black', alpha=0.8, legend=False)
+    ax_c.set_title('C. Context Consistency\n(Lower CV = More Convergent)',
+                   fontsize=13, fontweight='bold')
+    ax_c.set_xlabel('Context', fontsize=11)
+    ax_c.set_ylabel('Coefficient of Variation (CV)', fontsize=11)
+    ax_c.set_xticklabels(context_cv_sorted['context'], rotation=45, ha='right', fontsize=10)
+    ax_c.grid(axis='y', alpha=0.3)
+    ax_c.axhline(y=context_cv_sorted['cv'].mean(), color='red',
+                 linestyle='--', alpha=0.5, linewidth=1.5, label='Mean CV')
+    ax_c.legend(fontsize=9)
+
+    # PANEL D: Genre consistency (CV)
+    ax_d = fig.add_subplot(gs[1, 1])
+    genre_cv_sorted = genre_df.sort_values('cv')
+    genre_cv_sorted.plot(kind='bar', x='genre', y='cv',
+                         ax=ax_d, color='orange',
+                         edgecolor='black', alpha=0.8, legend=False)
+    ax_d.set_title('D. Genre Consistency\n(Lower CV = More Convergent)',
+                   fontsize=13, fontweight='bold')
+    ax_d.set_xlabel('Genre', fontsize=11)
+    ax_d.set_ylabel('Coefficient of Variation (CV)', fontsize=11)
+    ax_d.set_xticklabels(genre_cv_sorted['genre'], rotation=45, ha='right', fontsize=10)
+    ax_d.grid(axis='y', alpha=0.3)
+    ax_d.axhline(y=genre_cv_sorted['cv'].mean(), color='red',
+                 linestyle='--', alpha=0.5, linewidth=1.5, label='Mean CV')
+    ax_d.legend(fontsize=9)
+
+    plt.suptitle('Within-Factor Analysis: Context vs. Genre',
+                fontsize=16, fontweight='bold', y=0.995)
+
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
+def create_comparative_pairwise_figure(
+    context_pairs_df: pd.DataFrame,
+    genre_pairs_df: pd.DataFrame,
+    output_path: str,
+    figsize: Tuple[int, int] = (18, 8)
+) -> plt.Figure:
+    """
+    Side-by-side comparison of pairwise effect sizes.
+    
+    Layout (1x2):
+    A - Context pairwise comparisons
+    B - Genre pairwise comparisons
+    """
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # PANEL A: Context pairwise effect sizes
+    if len(context_pairs_df) > 0:
+        context_pairs_df['comparison'] = (context_pairs_df['context1'] + '\nvs\n' +
+                                          context_pairs_df['context2'])
+        context_sorted = context_pairs_df.sort_values('d', key=abs, ascending=True)
+        colors_sig = ['steelblue' if sig != 'n.s.' else 'lightgray'
+                     for sig in context_sorted['sig']]
+
+        axes[0].barh(range(len(context_sorted)), context_sorted['d'],
+                    color=colors_sig, edgecolor='black', alpha=0.8)
+        axes[0].set_yticks(range(len(context_sorted)))
+        axes[0].set_yticklabels(context_sorted['comparison'], fontsize=9)
+        axes[0].set_xlabel("Cohen's d (Effect Size)", fontsize=11)
+        axes[0].set_title('A. Pairwise Context Comparisons',
+                         fontsize=13, fontweight='bold')
+        axes[0].axvline(x=0, color='black', linestyle='-', linewidth=1.2)
+        axes[0].axvline(x=0.5, color='gray', linestyle='--', alpha=0.4, linewidth=1)
+        axes[0].axvline(x=-0.5, color='gray', linestyle='--', alpha=0.4, linewidth=1)
+        axes[0].grid(axis='x', alpha=0.3)
+    else:
+        axes[0].text(0.5, 0.5, 'No pairwise comparisons available',
+                    ha='center', va='center', fontsize=12, transform=axes[0].transAxes)
+
+    # PANEL B: Genre pairwise effect sizes
+    if len(genre_pairs_df) > 0:
+        genre_pairs_df['comparison'] = (genre_pairs_df['genre1'] + '\nvs\n' +
+                                        genre_pairs_df['genre2'])
+        genre_sorted = genre_pairs_df.sort_values('d', key=abs, ascending=True)
+        colors_sig = ['steelblue' if sig != 'n.s.' else 'lightgray'
+                     for sig in genre_sorted['sig']]
+
+        axes[1].barh(range(len(genre_sorted)), genre_sorted['d'],
+                    color=colors_sig, edgecolor='black', alpha=0.8)
+        axes[1].set_yticks(range(len(genre_sorted)))
+        axes[1].set_yticklabels(genre_sorted['comparison'], fontsize=9)
+        axes[1].set_xlabel("Cohen's d (Effect Size)", fontsize=11)
+        axes[1].set_title('B. Pairwise Genre Comparisons',
+                         fontsize=13, fontweight='bold')
+        axes[1].axvline(x=0, color='black', linestyle='-', linewidth=1.2)
+        axes[1].axvline(x=0.5, color='gray', linestyle='--', alpha=0.4, linewidth=1)
+        axes[1].axvline(x=-0.5, color='gray', linestyle='--', alpha=0.4, linewidth=1)
+        axes[1].grid(axis='x', alpha=0.3)
+    else:
+        axes[1].text(0.5, 0.5, 'No pairwise comparisons available',
+                    ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
+
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='steelblue', edgecolor='black', label='Significant'),
+        Patch(facecolor='lightgray', edgecolor='black', label='n.s.')
+    ]
+    fig.legend(handles=legend_elements, loc='lower center', ncol=2,
+              fontsize=10, bbox_to_anchor=(0.5, -0.02))
+
+    plt.suptitle('Pairwise Comparisons: Context vs. Genre',
+                fontsize=16, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
+def create_comparative_clip_vs_context_figure(
+    context_moderator_df: pd.DataFrame,
+    genre_moderator_df: pd.DataFrame,
+    output_path: str,
+    figsize: Tuple[int, int] = (16, 12)
+) -> plt.Figure:
+    """
+    Side-by-side comparison of clip vs. context effects by factor.
+    
+    Layout (2x2):
+    A - Context: Clip vs. Context means
+    B - Genre: Clip vs. Context means
+    C - Context: Effect sizes
+    D - Genre: Effect sizes
+    """
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.25)
+
+    # PANEL A: Context clip vs. context means
+    ax_a = fig.add_subplot(gs[0, 0])
+    if len(context_moderator_df) > 0:
+        context_sorted = context_moderator_df.sort_values('difference')
+        x = np.arange(len(context_sorted))
+        width = 0.35
+
+        ax_a.bar(x - width/2, context_sorted['clip_mean'],
+                width, label='Clip-driven', color='#3498db',
+                edgecolor='black', alpha=0.8)
+        ax_a.bar(x + width/2, context_sorted['context_mean'],
+                width, label='Context-driven', color='#e74c3c',
+                edgecolor='black', alpha=0.8)
+
+        ax_a.set_xlabel('')
+        ax_a.set_ylabel('Mean Cosine Similarity', fontsize=10)
+        ax_a.set_title('A. Clip vs. Context by Context',
+                      fontsize=13, fontweight='bold')
+        ax_a.set_xticks(x)
+        ax_a.set_xticklabels(context_sorted['context'], rotation=45, ha='right', fontsize=10)
+        ax_a.legend(fontsize=9, loc='upper right')
+        ax_a.grid(axis='y', alpha=0.3)
+
+        for i, (idx, row) in enumerate(context_sorted.iterrows()):
+            if row['sig'] != 'n.s.':
+                y_pos = max(row['clip_mean'], row['context_mean']) + 0.01
+                ax_a.text(i, y_pos, row['sig'], ha='center', va='bottom',
+                         fontsize=10, fontweight='bold')
+    else:
+        ax_a.text(0.5, 0.5, 'No data available',
+                 ha='center', va='center', fontsize=12, transform=ax_a.transAxes)
+
+    # PANEL B: Genre clip vs. context means
+    ax_b = fig.add_subplot(gs[0, 1])
+    if len(genre_moderator_df) > 0:
+        genre_sorted = genre_moderator_df.sort_values('difference')
+        x = np.arange(len(genre_sorted))
+        width = 0.35
+
+        ax_b.bar(x - width/2, genre_sorted['clip_mean'],
+                width, label='Clip-driven', color='#3498db',
+                edgecolor='black', alpha=0.8)
+        ax_b.bar(x + width/2, genre_sorted['context_mean'],
+                width, label='Context-driven', color='#e74c3c',
+                edgecolor='black', alpha=0.8)
+
+        ax_b.set_xlabel('')
+        ax_b.set_ylabel('Mean Cosine Similarity', fontsize=10)
+        ax_b.set_title('B. Clip vs. Context by Genre',
+                      fontsize=13, fontweight='bold')
+        ax_b.set_xticks(x)
+        ax_b.set_xticklabels(genre_sorted['genre'], rotation=45, ha='right', fontsize=10)
+        ax_b.legend(fontsize=9, loc='upper right')
+        ax_b.grid(axis='y', alpha=0.3)
+
+        for i, (idx, row) in enumerate(genre_sorted.iterrows()):
+            if row['sig'] != 'n.s.':
+                y_pos = max(row['clip_mean'], row['context_mean']) + 0.01
+                ax_b.text(i, y_pos, row['sig'], ha='center', va='bottom',
+                         fontsize=10, fontweight='bold')
+    else:
+        ax_b.text(0.5, 0.5, 'No data available',
+                 ha='center', va='center', fontsize=12, transform=ax_b.transAxes)
+
+    # PANEL C: Context effect sizes
+    ax_c = fig.add_subplot(gs[1, 0])
+    if len(context_moderator_df) > 0:
+        context_sorted = context_moderator_df.sort_values('effect_size')
+        colors = ['#3498db' if d > 0 else '#e74c3c'
+                 for d in context_sorted['effect_size']]
+
+        ax_c.barh(range(len(context_sorted)), context_sorted['effect_size'],
+                        color=colors, edgecolor='black', alpha=0.8)
+        ax_c.set_yticks(range(len(context_sorted)))
+        ax_c.set_yticklabels(context_sorted['context'], fontsize=10)
+        ax_c.set_xlabel("Cohen's d (Effect Size)", fontsize=10)
+        ax_c.set_title('C. Context Effect Sizes\n(Positive = Clip > Context)',
+                      fontsize=13, fontweight='bold')
+        ax_c.axvline(x=0, color='black', linestyle='-', linewidth=1.2)
+        ax_c.grid(axis='x', alpha=0.3)
+
+        for i, (idx, row) in enumerate(context_sorted.iterrows()):
+            if row['sig'] != 'n.s.':
+                x_pos = row['effect_size'] + (0.05 if row['effect_size'] > 0 else -0.05)
+                ax_c.text(x_pos, i, row['sig'], ha='left' if row['effect_size'] > 0 else 'right',
+                         va='center', fontsize=9, fontweight='bold')
+    else:
+        ax_c.text(0.5, 0.5, 'No data available',
+                 ha='center', va='center', fontsize=12, transform=ax_c.transAxes)
+
+    # PANEL D: Genre effect sizes
+    ax_d = fig.add_subplot(gs[1, 1])
+    if len(genre_moderator_df) > 0:
+        genre_sorted = genre_moderator_df.sort_values('effect_size')
+        colors = ['#3498db' if d > 0 else '#e74c3c'
+                 for d in genre_sorted['effect_size']]
+
+        ax_d.barh(range(len(genre_sorted)), genre_sorted['effect_size'],
+                        color=colors, edgecolor='black', alpha=0.8)
+        ax_d.set_yticks(range(len(genre_sorted)))
+        ax_d.set_yticklabels(genre_sorted['genre'], fontsize=10)
+        ax_d.set_xlabel("Cohen's d (Effect Size)", fontsize=10)
+        ax_d.set_title('D. Genre Effect Sizes\n(Positive = Clip > Context)',
+                      fontsize=13, fontweight='bold')
+        ax_d.axvline(x=0, color='black', linestyle='-', linewidth=1.2)
+        ax_d.grid(axis='x', alpha=0.3)
+
+        for i, (idx, row) in enumerate(genre_sorted.iterrows()):
+            if row['sig'] != 'n.s.':
+                x_pos = row['effect_size'] + (0.05 if row['effect_size'] > 0 else -0.05)
+                ax_d.text(x_pos, i, row['sig'], ha='left' if row['effect_size'] > 0 else 'right',
+                         va='center', fontsize=9, fontweight='bold')
+    else:
+        ax_d.text(0.5, 0.5, 'No data available',
+                 ha='center', va='center', fontsize=12, transform=ax_d.transAxes)
+
+    plt.suptitle('Clip vs. Context Effects: Context vs. Genre',
+                fontsize=16, fontweight='bold', y=0.995)
+
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
+def create_comparative_consistency_figure(
+    context_consistency_comp_df: pd.DataFrame,
+    genre_consistency_comp_df: pd.DataFrame,
+    output_path: str,
+    figsize: Tuple[int, int] = (16, 7)
+) -> plt.Figure:
+    """
+    Side-by-side comparison of clip vs. context consistency.
+    
+    Layout (1x2):
+    A - Context: Clip vs. Context consistency (CV)
+    B - Genre: Clip vs. Context consistency (CV)
+    """
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # PANEL A: Context clip vs. context consistency
+    if len(context_consistency_comp_df) > 0:
+        context_sorted = context_consistency_comp_df.sort_values('context')
+        x = np.arange(len(context_sorted))
+        width = 0.35
+
+        axes[0].bar(x - width/2, context_sorted['clip_cv'],
+                   width, label='Clip-driven', color='#3498db',
+                   edgecolor='black', alpha=0.8)
+        axes[0].bar(x + width/2, context_sorted['context_cv'],
+                   width, label='Context-driven', color='#e74c3c',
+                   edgecolor='black', alpha=0.8)
+
+        axes[0].set_xlabel('Context', fontsize=11)
+        axes[0].set_ylabel('Coefficient of Variation (CV)', fontsize=11)
+        axes[0].set_title('A. Consistency by Context\n(Lower CV = More Consistent)',
+                         fontsize=13, fontweight='bold')
+        axes[0].set_xticks(x)
+        axes[0].set_xticklabels(context_sorted['context'], rotation=45, ha='right', fontsize=10)
+        axes[0].legend(fontsize=10)
+        axes[0].grid(axis='y', alpha=0.3)
+
+        for i, (idx, row) in enumerate(context_sorted.iterrows()):
+            if row['levene_p'] < 0.05:
+                y_pos = max(row['clip_cv'], row['context_cv']) + 0.01
+                axes[0].text(i, y_pos, row['sig'], ha='center', va='bottom',
+                            fontsize=10, fontweight='bold')
+    else:
+        axes[0].text(0.5, 0.5, 'No data available',
+                    ha='center', va='center', fontsize=12, transform=axes[0].transAxes)
+
+    # PANEL B: Genre clip vs. context consistency
+    if len(genre_consistency_comp_df) > 0:
+        genre_sorted = genre_consistency_comp_df.sort_values('genre')
+        x = np.arange(len(genre_sorted))
+        width = 0.35
+
+        axes[1].bar(x - width/2, genre_sorted['clip_cv'],
+                   width, label='Clip-driven', color='#3498db',
+                   edgecolor='black', alpha=0.8)
+        axes[1].bar(x + width/2, genre_sorted['context_cv'],
+                   width, label='Context-driven', color='#e74c3c',
+                   edgecolor='black', alpha=0.8)
+
+        axes[1].set_xlabel('Genre', fontsize=11)
+        axes[1].set_ylabel('Coefficient of Variation (CV)', fontsize=11)
+        axes[1].set_title('B. Consistency by Genre\n(Lower CV = More Consistent)',
+                         fontsize=13, fontweight='bold')
+        axes[1].set_xticks(x)
+        axes[1].set_xticklabels(genre_sorted['genre'], rotation=45, ha='right', fontsize=10)
+        axes[1].legend(fontsize=10)
+        axes[1].grid(axis='y', alpha=0.3)
+
+        for i, (idx, row) in enumerate(genre_sorted.iterrows()):
+            if row['levene_p'] < 0.05:
+                y_pos = max(row['clip_cv'], row['context_cv']) + 0.01
+                axes[1].text(i, y_pos, row['sig'], ha='center', va='bottom',
+                            fontsize=10, fontweight='bold')
+    else:
+        axes[1].text(0.5, 0.5, 'No data available',
+                    ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
+
+    plt.suptitle('Consistency Comparison: Clip vs. Context Effects',
+                fontsize=16, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
+def create_similarity_matrices_figure(
+    context_within_df: pd.DataFrame,
+    genre_within_df: pd.DataFrame,
+    sim_df: pd.DataFrame,
+    metadata: pd.DataFrame,
+    output_path: str,
+    figsize: Tuple[int, int] = (16, 7)
+) -> plt.Figure:
+    """
+    Side-by-side similarity matrices for context and genre.
+    
+    Layout (1x2):
+    A - Context similarity matrix
+    B - Genre similarity matrix
+    """
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # PANEL A: Context similarity matrix
+    unique_contexts = metadata['context_word'].unique()
+    context_matrix = np.zeros((len(unique_contexts), len(unique_contexts)))
+
+    for i, ctx1 in enumerate(unique_contexts):
+        for j, ctx2 in enumerate(unique_contexts):
+            if i == j:
+                val = context_within_df[context_within_df['context'] == ctx1]['mean'].values
+                context_matrix[i, j] = val[0] if len(val) > 0 else np.nan
+            else:
+                cross_sims = sim_df[
+                    (sim_df['context_i'] == ctx1) &
+                    (sim_df['context_j'] == ctx2)
+                ]['similarity']
+
+                if len(cross_sims) > 0:
+                    context_matrix[i, j] = cross_sims.mean()
+                else:
+                    cross_sims = sim_df[
+                        (sim_df['context_i'] == ctx2) &
+                        (sim_df['context_j'] == ctx1)
+                    ]['similarity']
+                    context_matrix[i, j] = cross_sims.mean() if len(cross_sims) > 0 else np.nan
+
+    sns.heatmap(context_matrix, annot=True, fmt='.3f', cmap='YlOrRd',
+                xticklabels=unique_contexts, yticklabels=unique_contexts, ax=axes[0],
+                cbar_kws={'label': 'Mean Similarity'},
+                mask=np.isnan(context_matrix),
+                linewidths=0.5, linecolor='gray')
+
+    axes[0].set_title('A. Context Similarity Matrix\n(Diagonal = Within-Context)',
+                     fontsize=13, fontweight='bold')
+    axes[0].set_xlabel('Context', fontsize=11)
+    axes[0].set_ylabel('Context', fontsize=11)
+
+    # PANEL B: Genre similarity matrix
+    unique_genres = metadata['genre_code'].unique()
+    genre_matrix = np.zeros((len(unique_genres), len(unique_genres)))
+
+    for i, genre1 in enumerate(unique_genres):
+        for j, genre2 in enumerate(unique_genres):
+            if i == j:
+                val = genre_within_df[genre_within_df['genre'] == genre1]['mean'].values
+                genre_matrix[i, j] = val[0] if len(val) > 0 else np.nan
+            else:
+                cross_sims = sim_df[
+                    (sim_df['genre_i'] == genre1) &
+                    (sim_df['genre_j'] == genre2)
+                ]['similarity']
+
+                if len(cross_sims) > 0:
+                    genre_matrix[i, j] = cross_sims.mean()
+                else:
+                    cross_sims = sim_df[
+                        (sim_df['genre_i'] == genre2) &
+                        (sim_df['genre_j'] == genre1)
+                    ]['similarity']
+                    genre_matrix[i, j] = cross_sims.mean() if len(cross_sims) > 0 else np.nan
+
+    sns.heatmap(genre_matrix, annot=True, fmt='.3f', cmap='YlOrRd',
+                xticklabels=unique_genres, yticklabels=unique_genres, ax=axes[1],
+                cbar_kws={'label': 'Mean Similarity'},
+                mask=np.isnan(genre_matrix),
+                linewidths=0.5, linecolor='gray')
+
+    axes[1].set_title('B. Genre Similarity Matrix\n(Diagonal = Within-Genre)',
+                     fontsize=13, fontweight='bold')
+    axes[1].set_xlabel('Genre', fontsize=11)
+    axes[1].set_ylabel('Genre', fontsize=11)
+
+    plt.suptitle('Similarity Matrices: Context vs. Genre',
+                fontsize=16, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
+def create_genre_context_interaction_heatmap(
+    genre_context_df: pd.DataFrame,
+    output_path: str,
+    figsize: Tuple[int, int] = (10, 8)
+) -> plt.Figure:
+    """
+    Create Genre × Context interaction heatmap.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+
+    genre_context_pivot = genre_context_df.pivot(index='genre', columns='context', values='mean')
+
+    sns.heatmap(genre_context_pivot, annot=True, fmt='.3f', cmap='RdYlGn',
+                ax=ax, cbar_kws={'label': 'Mean Similarity'},
+                linewidths=0.5, linecolor='gray')
+
+    ax.set_title('Genre × Context Interaction\n(Thought Similarity When Context Matches)',
+                fontsize=14, fontweight='bold')
+    ax.set_xlabel('Context', fontsize=12)
+    ax.set_ylabel('Genre', fontsize=12)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
+def create_primary_comparison_bar_chart(
+    sim_df: pd.DataFrame,
+    primary_comparison: Dict[str, Any],
+    output_path: str,
+    figsize: Tuple[int, int] = (9, 7)
+) -> plt.Figure:
+    """
+    Bar chart comparing clip vs context with confidence intervals and effect size.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+
+    clip_data = sim_df[sim_df['condition'] == 'same_clip_diff_context']['similarity']
+    context_data = sim_df[sim_df['condition'] == 'diff_clip_same_context']['similarity']
+
+    clip_mean = clip_data.mean()
+    context_mean = context_data.mean()
+    
+    # Calculate 95% CI
+    clip_ci = stats.t.interval(0.95, len(clip_data)-1, loc=clip_mean, scale=stats.sem(clip_data))
+    context_ci = stats.t.interval(0.95, len(context_data)-1, loc=context_mean, scale=stats.sem(context_data))
+
+    categories = ['Clip-Driven\n(Same Clip,\nDiff Context)',
+                  'Context-Driven\n(Diff Clip,\nSame Context)']
+    means = [clip_mean, context_mean]
+    colors_primary = ['#3498db', '#e74c3c']
+
+    bars = ax.bar(categories, means, color=colors_primary, edgecolor='black',
+                  linewidth=2, alpha=0.85, width=0.6)
+
+    ci_ranges = [
+        (clip_ci[1] - clip_ci[0]) / 2,
+        (context_ci[1] - context_ci[0]) / 2
+    ]
+    ax.errorbar(range(len(means)), means, yerr=ci_ranges, fmt='none',
+                ecolor='black', capsize=8, capthick=2, linewidth=2)
+
+    for i, (bar, mean, ci, ci_range) in enumerate(zip(bars, means, [clip_ci, context_ci], ci_ranges)):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + ci_range + 0.008,
+                f'{mean:.4f}', ha='center', va='bottom', fontsize=12, fontweight='bold')
+        ax.text(bar.get_x() + bar.get_width()/2., height - 0.015,
+                f'95% CI:\n[{ci[0]:.4f},\n{ci[1]:.4f}]',
+                ha='center', va='top', fontsize=9, style='italic')
+
+    mid_point = (means[0] + means[1]) / 2
+    y_arrow = mid_point + 0.01
+    ax.annotate('', xy=(0, y_arrow), xytext=(1, y_arrow),
+                arrowprops=dict(arrowstyle='<->', lw=2.5, color='black'))
+
+    effect_text = f"Cohen's d = {primary_comparison['d']:.3f} {primary_comparison['sig']}\n"
+    effect_text += f"Δ = {primary_comparison['diff']:.4f} ({(primary_comparison['diff']/context_mean)*100:+.1f}%)\n"
+    effect_text += f"t = {primary_comparison['t']:.2f}, p = {primary_comparison['p']:.4f}"
+    ax.text(0.5, y_arrow + 0.02, effect_text,
+            ha='center', va='bottom', fontsize=11, fontweight='bold',
+            bbox=dict(boxstyle='round,pad=0.8', facecolor='yellow',
+                     edgecolor='black', alpha=0.8, linewidth=2))
+
+    ax.set_ylabel('Mean Cosine Similarity', fontsize=13, fontweight='bold')
+    ax.set_title('Clip vs. Context Influence\n' +
+                 'Which Factor Drives Thought Similarity More?',
+                 fontsize=14, fontweight='bold', pad=20)
+    ax.set_ylim([0, max(means) * 1.35])
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+
+    ax.text(0, -0.08, f'N = {len(clip_data)}',
+            transform=ax.transData, ha='center', fontsize=10, style='italic')
+    ax.text(1, -0.08, f'N = {len(context_data)}',
+            transform=ax.transData, ha='center', fontsize=10, style='italic')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
+def create_comprehensive_conditions_figure(
+    sim_df: pd.DataFrame,
+    primary_comparison: Dict[str, Any],
+    output_path: str,
+    figsize: Tuple[int, int] = (16, 12)
+) -> plt.Figure:
+    """
+    Comprehensive 4-panel comparison showing all conditions.
+    
+    Layout (2x2):
+    A - Boxplot comparison
+    B - Distribution histogram
+    C - All conditions violin plot
+    """
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+
+    # PANEL A: Boxplot comparison
+    ax_a = fig.add_subplot(gs[0, 0])
+    comparison_data = sim_df[sim_df['condition'].isin([
+        'same_clip_diff_context',
+        'diff_clip_same_context'
+    ])].copy()
+
+    comparison_data['condition_label'] = comparison_data['condition'].map({
+        'same_clip_diff_context': 'Same Clip\nDifferent Context',
+        'diff_clip_same_context': 'Different Clip\nSame Context'
+    })
+
+    order = ['Same Clip\nDifferent Context', 'Different Clip\nSame Context']
+    palette = ['#e74c3c', '#3498db']
+
+    sns.boxplot(data=comparison_data, x='condition_label', y='similarity', ax=ax_a,
+                hue='condition_label', palette=palette, legend=False, order=order)
+    sns.stripplot(data=comparison_data, x='condition_label', y='similarity', ax=ax_a,
+                  hue='condition_label', palette='dark:black', alpha=0.3, size=3,
+                  legend=False, order=order)
+
+    ax_a.set_title('A. Distribution Comparison\n(Clip vs. Context)',
+                   fontsize=12, fontweight='bold')
+    ax_a.set_xlabel('')
+    ax_a.set_ylabel('Cosine Similarity', fontsize=10)
+    ax_a.grid(axis='y', alpha=0.3)
+
+    y_max_a = comparison_data['similarity'].max()
+    bracket_y_a = y_max_a + 0.05
+    ax_a.plot([0, 1], [bracket_y_a, bracket_y_a], 'k-', linewidth=2)
+    ax_a.plot([0, 0], [bracket_y_a - 0.01, bracket_y_a], 'k-', linewidth=2)
+    ax_a.plot([1, 1], [bracket_y_a - 0.01, bracket_y_a], 'k-', linewidth=2)
+    ax_a.text(0.5, bracket_y_a + 0.01, primary_comparison['sig'],
+             ha='center', va='bottom', fontsize=11, fontweight='bold')
+
+    # PANEL B: Distribution histogram
+    ax_b = fig.add_subplot(gs[0, 1])
+    clip_driven = sim_df[sim_df['condition'] == 'same_clip_diff_context']['similarity']
+    context_driven = sim_df[sim_df['condition'] == 'diff_clip_same_context']['similarity']
+
+    ax_b.hist(clip_driven, bins=25, alpha=0.6, label='Same Clip, Diff Context',
+              color='#3498db', density=True, edgecolor='black')
+    ax_b.hist(context_driven, bins=25, alpha=0.6, label='Diff Clip, Same Context',
+              color='#e74c3c', density=True, edgecolor='black')
+    ax_b.axvline(clip_driven.mean(), color='#3498db', linestyle='--', linewidth=2.5,
+                 label=f'Clip Mean: {clip_driven.mean():.3f}')
+    ax_b.axvline(context_driven.mean(), color='#e74c3c', linestyle='--', linewidth=2.5,
+                 label=f'Context Mean: {context_driven.mean():.3f}')
+
+    ax_b.set_xlabel('Cosine Similarity', fontsize=10)
+    ax_b.set_ylabel('Density', fontsize=10)
+    ax_b.set_title('B. Distribution Overlap',
+                   fontsize=12, fontweight='bold')
+    ax_b.legend(fontsize=9, loc='upper right')
+    ax_b.grid(axis='y', alpha=0.3)
+
+    # PANEL C: All conditions violin plot
+    ax_c = fig.add_subplot(gs[1, :])
+
+    order_all = ['same_clip_diff_context', 'diff_clip_same_context',
+                 'diff_clip_diff_context_same_genre', 'diff_clip_diff_context_diff_genre']
+    labels_all = ['Same Clip\nDiff Context\n(Clip-Driven)',
+                  'Diff Clip\nSame Context\n(Context-Driven)',
+                  'Both Different\nSame Genre',
+                  'Both Different\nDiff Genre']
+    palette_all = {
+        'same_clip_diff_context': '#3498db',
+        'diff_clip_same_context': '#e74c3c',
+        'diff_clip_diff_context_same_genre': '#2ecc71',
+        'diff_clip_diff_context_diff_genre': '#95a5a6'
+    }
+
+    sns.violinplot(data=sim_df, x='condition', y='similarity', ax=ax_c,
+                   order=order_all, hue='condition', palette=palette_all,
+                   legend=False, inner='box', linewidth=1.5)
+
+    ax_c.set_xticklabels(labels_all, rotation=0, ha='center', fontsize=10)
+    ax_c.set_title('C. All Experimental Conditions (Clip vs. Context Highlighted)',
+                   fontsize=12, fontweight='bold')
+    ax_c.set_xlabel('')
+    ax_c.set_ylabel('Cosine Similarity', fontsize=10)
+    ax_c.grid(axis='y', alpha=0.3, linestyle='--')
+    ax_c.set_axisbelow(True)
+
+    y_max_c = sim_df['similarity'].max()
+    bracket_y_c = y_max_c + 0.08
+    ax_c.plot([0, 1], [bracket_y_c, bracket_y_c], 'k-', linewidth=2)
+    ax_c.plot([0, 0], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
+    ax_c.plot([1, 1], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
+    ax_c.text(0.5, bracket_y_c + 0.01,
+              f"Primary Comparison\nd = {primary_comparison['d']:.3f} {primary_comparison['sig']}",
+              ha='center', va='bottom', fontsize=10, fontweight='bold',
+              bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7,
+                       edgecolor='black', linewidth=1.5))
+
+    for i, cond in enumerate(order_all):
+        n = len(sim_df[sim_df['condition'] == cond])
+        ax_c.text(i, -0.05, f'n={n}', ha='center', va='top',
+                  transform=ax_c.get_xaxis_transform(), fontsize=9, style='italic')
+
+    overall_mean = sim_df['similarity'].mean()
+    ax_c.axhline(y=overall_mean, color='darkgreen', linestyle=':',
+                 linewidth=2, alpha=0.5, label=f'Overall Mean: {overall_mean:.4f}')
+    ax_c.legend(loc='upper right', fontsize=9)
+
+    plt.suptitle('Comprehensive Condition Comparison Analysis',
+                fontsize=15, fontweight='bold', y=0.995)
+
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    return fig
+
+
 def create_binary_comparisons_figure(
     sim_df: pd.DataFrame,
     binary_results: List[Dict[str, Any]],
@@ -1144,6 +1872,238 @@ def create_binary_comparisons_figure(
 
 
 # ==============================================================================
+# t-SNE DIMENSIONALITY REDUCTION
+# ==============================================================================
+
+def run_tsne_analysis(
+    embedding_matrix: np.ndarray,
+    metadata: pd.DataFrame,
+    output_dir: str,
+    model_prefix: str = 'TFIDF',
+    svd_components: int = 50,
+    tsne_perplexity: int = 30,
+    tsne_n_iter: int = 1000,
+    tsne_random_state: int = 42,
+    do_word_tsne: bool = False,
+    tfidf_scores_df: Optional[pd.DataFrame] = None,
+    top_n_words: int = 500,
+    verbose: bool = True
+) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+    """
+    Run t-SNE dimensionality reduction on document embeddings.
+    
+    Parameters
+    ----------
+    embedding_matrix : np.ndarray
+        Document embedding matrix (n_docs, n_features) - can be sparse or dense
+    metadata : pd.DataFrame
+        Document metadata with columns: ClipContext_pair, clip_name, context_word, genre_code
+    output_dir : str
+        Directory to save outputs
+    model_prefix : str
+        Prefix for output files (e.g., 'TFIDF', 'W2V', 'BERT')
+    svd_components : int
+        Number of SVD components for dimensionality reduction before t-SNE
+    tsne_perplexity : int
+        t-SNE perplexity parameter
+    tsne_n_iter : int
+        Number of t-SNE iterations
+    tsne_random_state : int
+        Random state for reproducibility
+    do_word_tsne : bool
+        Whether to run t-SNE on word vectors (only for TF-IDF)
+    tfidf_scores_df : pd.DataFrame, optional
+        TF-IDF scores dataframe for word-level t-SNE (rows=docs, cols=terms)
+    top_n_words : int
+        Number of top words to include in word t-SNE
+    verbose : bool
+        Whether to print progress messages
+        
+    Returns
+    -------
+    Tuple[pd.DataFrame, Optional[pd.DataFrame]]
+        - doc_tsne_df: Document t-SNE coordinates with metadata
+        - word_tsne_df: Word t-SNE coordinates (None if do_word_tsne=False)
+    """
+    if verbose:
+        print("\n" + "="*70)
+        print(f"t-SNE ANALYSIS ({model_prefix})")
+        print("="*70)
+    
+    # Convert to dense if sparse
+    if hasattr(embedding_matrix, "toarray"):
+        X_docs = embedding_matrix.toarray()
+        if verbose:
+            print(f"Converted sparse matrix to dense")
+    else:
+        X_docs = embedding_matrix
+    
+    if verbose:
+        print(f"Document embedding shape: {X_docs.shape}")
+    
+    # Ensure alignment
+    if X_docs.shape[0] != len(metadata):
+        raise ValueError(f"Embedding rows ({X_docs.shape[0]}) != metadata rows ({len(metadata)})")
+    
+    # Dimensionality reduction with TruncatedSVD
+    n_svd = min(svd_components, X_docs.shape[1] - 1) if X_docs.shape[1] > 1 else 1
+    if n_svd <= 0:
+        n_svd = 1
+    
+    if verbose:
+        print(f"\nRunning TruncatedSVD -> {n_svd} components (original dim={X_docs.shape[1]})")
+    
+    svd = TruncatedSVD(n_components=n_svd, random_state=tsne_random_state)
+    X_svd = svd.fit_transform(X_docs)
+    
+    explained = svd.explained_variance_ratio_.sum()
+    if verbose:
+        print(f"TruncatedSVD explained variance ratio: {explained:.3f}")
+    
+    # t-SNE on documents
+    if verbose:
+        print(f"\nRunning t-SNE on document vectors...")
+        print(f"  Perplexity: {tsne_perplexity}")
+        print(f"  Iterations: {tsne_n_iter}")
+    
+    tsne = TSNE(n_components=2, perplexity=tsne_perplexity, n_iter=tsne_n_iter,
+                random_state=tsne_random_state, init='pca', learning_rate='auto')
+    X_doc_emb = tsne.fit_transform(X_svd)
+    
+    # Create results dataframe
+    meta_subset = metadata[['ClipContext_pair', 'clip_name', 'context_word', 'genre_code']].reset_index(drop=True)
+    emb_df = pd.DataFrame(X_doc_emb, columns=['TSNE1', 'TSNE2'])
+    doc_tsne_df = pd.concat([meta_subset, emb_df], axis=1)
+    
+    # Save coordinates
+    doc_coords_path = os.path.join(output_dir, f'{model_prefix}_tsne_coords.csv')
+    doc_tsne_df.to_csv(doc_coords_path, index=False)
+    if verbose:
+        print(f"\n✓ Saved document t-SNE coordinates to: {doc_coords_path}")
+    
+    # Plot document t-SNE
+    _plot_document_tsne(doc_tsne_df, output_dir, model_prefix, verbose)
+    
+    # Optional: Word-level t-SNE (only for TF-IDF)
+    word_tsne_df = None
+    if do_word_tsne and tfidf_scores_df is not None:
+        word_tsne_df = _run_word_tsne(
+            tfidf_scores_df, output_dir, model_prefix,
+            top_n_words, tsne_random_state, verbose
+        )
+    
+    if verbose:
+        print("\n✓ t-SNE analysis complete")
+    
+    return doc_tsne_df, word_tsne_df
+
+
+def _plot_document_tsne(
+    tsne_df: pd.DataFrame,
+    output_dir: str,
+    model_prefix: str,
+    verbose: bool
+) -> None:
+    """Helper function to plot document t-SNE results."""
+    plt.figure(figsize=(10, 8))
+    sns.set(style='whitegrid', font_scale=1.1)
+    
+    ax = sns.scatterplot(data=tsne_df, x='TSNE1', y='TSNE2',
+                         hue='genre_code', style='context_word',
+                         palette='tab10', s=120, alpha=0.9)
+    
+    plt.title(f't-SNE: {model_prefix} Document Embeddings (2D)', fontsize=13, fontweight='bold')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+    plt.tight_layout()
+    
+    plot_path = os.path.join(output_dir, f'{model_prefix}_tsne_plot.png')
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    if verbose:
+        print(f"✓ Saved document t-SNE plot to: {plot_path}")
+
+
+def _run_word_tsne(
+    tfidf_scores_df: pd.DataFrame,
+    output_dir: str,
+    model_prefix: str,
+    top_n_words: int,
+    random_state: int,
+    verbose: bool
+) -> pd.DataFrame:
+    """Helper function to run word-level t-SNE (TF-IDF only)."""
+    if verbose:
+        print(f"\nRunning word-level t-SNE on top {top_n_words} terms...")
+    
+    # Select top-N words by average TF-IDF
+    term_means = tfidf_scores_df.mean(axis=0)
+    top_terms = term_means.sort_values(ascending=False).head(top_n_words).index.tolist()
+    
+    if verbose:
+        print(f"Selected {len(top_terms)} terms by mean TF-IDF")
+    
+    # Build term x doc matrix
+    W = tfidf_scores_df[top_terms].T.values  # shape (n_terms, n_docs)
+    
+    # Reduce with SVD
+    svd_w_components = min(30, W.shape[1] - 1) if W.shape[1] > 1 else 1
+    if svd_w_components <= 0:
+        svd_w_components = 1
+    svd_w = TruncatedSVD(n_components=svd_w_components, random_state=random_state)
+    W_reduced = svd_w.fit_transform(W)
+    
+    # t-SNE
+    tsne_w = TSNE(n_components=2, perplexity=30, n_iter=1000,
+                  random_state=random_state, init='pca', learning_rate='auto')
+    W_emb = tsne_w.fit_transform(W_reduced)
+    
+    # Create results dataframe
+    words_df = pd.DataFrame(W_emb, columns=['TSNE1', 'TSNE2'])
+    words_df['term'] = top_terms
+    
+    words_csv = os.path.join(output_dir, f'{model_prefix}_word_tsne_top{len(top_terms)}.csv')
+    words_df.to_csv(words_csv, index=False)
+    if verbose:
+        print(f"✓ Saved word t-SNE coords to: {words_csv}")
+    
+    # Plot words
+    _plot_word_tsne(words_df, term_means, top_terms, output_dir, model_prefix, verbose)
+    
+    return words_df
+
+
+def _plot_word_tsne(
+    words_df: pd.DataFrame,
+    term_means: pd.Series,
+    top_terms: List[str],
+    output_dir: str,
+    model_prefix: str,
+    verbose: bool,
+    annotate_k: int = 60
+) -> None:
+    """Helper function to plot word t-SNE results."""
+    plt.figure(figsize=(12, 10))
+    sns.scatterplot(data=words_df, x='TSNE1', y='TSNE2', s=40, color='darkgreen', alpha=0.7)
+    
+    # Annotate top K highest-mean tfidf words
+    annotate_terms = term_means.loc[top_terms].sort_values(ascending=False).head(annotate_k).index
+    for _, row in words_df[words_df['term'].isin(annotate_terms)].iterrows():
+        plt.text(row['TSNE1'] + 0.5, row['TSNE2'] + 0.5, row['term'], fontsize=9)
+    
+    plt.title(f't-SNE: top-{len(top_terms)} TF-IDF terms (annotated top {annotate_k})',
+              fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    
+    words_png = os.path.join(output_dir, f'{model_prefix}_word_tsne_top{len(top_terms)}.png')
+    plt.savefig(words_png, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    if verbose:
+        print(f"✓ Saved word t-SNE plot to: {words_png}")
+
+
+# ==============================================================================
 # UTILITY FUNCTIONS
 # ==============================================================================
 
@@ -1177,6 +2137,125 @@ def save_similarity_by_condition(
         print("\nCondition summary:")
         summary = sim_df.groupby('condition')['similarity'].agg(['count', 'mean', 'std', 'min', 'max'])
         print(summary)
+
+
+def generate_all_visualizations(
+    context_within_df: pd.DataFrame,
+    genre_within_df: pd.DataFrame,
+    context_pairs_df: pd.DataFrame,
+    genre_pairs_df: pd.DataFrame,
+    context_moderator_df: pd.DataFrame,
+    genre_moderator_df: pd.DataFrame,
+    context_consistency_df: pd.DataFrame,
+    genre_consistency_df: pd.DataFrame,
+    context_consistency_comp_df: pd.DataFrame,
+    genre_consistency_comp_df: pd.DataFrame,
+    genre_context_df: pd.DataFrame,
+    sim_df: pd.DataFrame,
+    metadata: pd.DataFrame,
+    primary_comparison: Dict[str, Any],
+    output_dir: str,
+    model_prefix: str = 'TFIDF',
+    verbose: bool = True
+) -> None:
+    """
+    Generate all visualization figures in one call.
+    
+    Parameters
+    ----------
+    All dataframes from the analysis pipeline
+    output_dir : str
+        Directory to save figures
+    model_prefix : str
+        Prefix for output filenames
+    verbose : bool
+        Whether to print progress messages
+    """
+    if verbose:
+        print("\n" + "="*70)
+        print("GENERATING FACTOR-SPECIFIC VISUALIZATIONS")
+        print("="*70)
+    
+    # Figure 1: Within-factor comparison
+    if verbose:
+        print("\n1. Generating within-factor comparison (Context vs. Genre)...")
+    create_comparative_within_factor_figure(
+        context_within_df, genre_within_df,
+        os.path.join(output_dir, f'{model_prefix}_within_factor_comparison.png')
+    )
+    
+    # Figure 2: Pairwise comparison
+    if verbose:
+        print("\n2. Generating pairwise comparison (Context vs. Genre)...")
+    create_comparative_pairwise_figure(
+        context_pairs_df, genre_pairs_df,
+        os.path.join(output_dir, f'{model_prefix}_pairwise_comparison.png')
+    )
+    
+    # Figure 3: Clip vs. context comparison
+    if verbose:
+        print("\n3. Generating clip vs. context comparison (Context vs. Genre)...")
+    create_comparative_clip_vs_context_figure(
+        context_moderator_df, genre_moderator_df,
+        os.path.join(output_dir, f'{model_prefix}_clip_vs_context_comparison.png')
+    )
+    
+    # Figure 4: Consistency comparison
+    if verbose:
+        print("\n4. Generating consistency comparison (Context vs. Genre)...")
+    create_comparative_consistency_figure(
+        context_consistency_comp_df, genre_consistency_comp_df,
+        os.path.join(output_dir, f'{model_prefix}_consistency_comparison.png')
+    )
+    
+    # Figure 5: Similarity matrices
+    if verbose:
+        print("\n5. Generating similarity matrices (Context vs. Genre)...")
+    create_similarity_matrices_figure(
+        context_within_df, genre_within_df, sim_df, metadata,
+        os.path.join(output_dir, f'{model_prefix}_similarity_matrices.png')
+    )
+    
+    # Figure 6: Genre × Context interaction
+    if verbose:
+        print("\n6. Generating Genre × Context interaction heatmap...")
+    create_genre_context_interaction_heatmap(
+        genre_context_df,
+        os.path.join(output_dir, f'{model_prefix}_genre_context_interaction.png')
+    )
+    
+    # Figure 7: Primary comparison bar chart
+    if verbose:
+        print("\n7. Generating primary comparison bar chart...")
+    create_primary_comparison_bar_chart(
+        sim_df, primary_comparison,
+        os.path.join(output_dir, f'{model_prefix}_clip_vs_context.png')
+    )
+    
+    # Figure 8: Comprehensive conditions
+    if verbose:
+        print("\n8. Generating comprehensive conditions figure...")
+    create_comprehensive_conditions_figure(
+        sim_df, primary_comparison,
+        os.path.join(output_dir, f'{model_prefix}_comprehensive_conditions.png')
+    )
+    
+    if verbose:
+        print("\n" + "="*70)
+        print("FACTOR-SPECIFIC VISUALIZATION SUMMARY")
+        print("="*70)
+        print("Generated 8 comprehensive figures:")
+        print("  Fig1: Within-factor comparison (2×2: similarity + consistency)")
+        print("  Fig2: Pairwise comparison (1×2: effect sizes)")
+        print("  Fig3: Clip vs. context comparison (2×2: means + effect sizes)")
+        print("  Fig4: Consistency comparison (1×2: clip vs. context CVs)")
+        print("  Fig5: Similarity matrices (1×2: context + genre heatmaps)")
+        print("  Fig6: Genre × Context interaction (heatmap)")
+        print("  Fig7: Primary comparison bar chart (clip vs. context)")
+        print("  Fig8: Comprehensive conditions (3-panel)")
+        print("\nAll context vs. genre comparisons are side-by-side for easy comparison!")
+        print("="*70)
+
 
 
 # End of file
