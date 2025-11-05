@@ -1061,27 +1061,37 @@ def print_consistency_comparison_summary(
 # PLOTTING & VISUALISATION
 # ==============================================================================
 
-def create_comparative_music_vs_context_figure(
+def create_comparative_clip_vs_context_figure(
     sim_df: pd.DataFrame,
     figsize: Tuple[int, int] = (8, 5)
 ) -> plt.Figure:
     """
-    Create the canonical music vs context comparison figure.
+    Create the canonical clip vs context comparison figure.
     
     Compares 'same_clip_diff_context' vs 'diff_clip_same_context'.
     """
     conds = ["same_clip_diff_context", "diff_clip_same_context"]
-    cond_labels = ["Same clip\nDifferent context\n(Music)", "Different clip\nSame context\n(Context)"]
+    cond_labels = [
+        "Same clip\nDifferent context\n(Clip Effect)",
+        "Different clip\nSame context\n(Context Effect)",
+    ]
     
     plot_df = sim_df[sim_df["condition"].isin(conds)].copy()
     plot_df["label"] = plot_df["condition"].map({c: lab for c, lab in zip(conds, cond_labels)})
+    # Enforce categorical ordering so violinplot draws in requested order
+    plot_df["label"] = pd.Categorical(plot_df["label"], categories=cond_labels, ordered=True)
     
     fig, ax = plt.subplots(figsize=figsize)
-    sns.violinplot(x="label", y="similarity", data=plot_df, ax=ax, palette=['#3498db', '#e74c3c'])
-    sns.pointplot(x="label", y="similarity", data=plot_df, join=False, color="white", 
-                  ci='sd', ax=ax, markers='d', scale=0.75)
+    sns.violinplot(x="label", y="similarity", data=plot_df,
+        ax=ax, hue="label", palette=['#3498db', '#e74c3c'], 
+        order=cond_labels
+    )
+    sns.pointplot(x="label", y="similarity", data=plot_df, linestyle='none',
+        color="white", errorbar='sd', ax=ax, markers='d', scale=0.75,
+        order=cond_labels
+    )
     
-    ax.set_title("Music vs. Context Influence", fontsize=13, fontweight='bold')
+    ax.set_title("Isolated Clip vs. Context Influence", fontsize=13, fontweight='bold')
     ax.set_ylabel("Cosine Similarity", fontsize=11)
     ax.set_xlabel("")
     plt.tight_layout()
