@@ -2169,12 +2169,6 @@ def generate_all_visualizations(
         print("GENERATING FACTOR-SPECIFIC VISUALIZATIONS")
         print("="*70)
 
-    # local import to avoid hard dependency for non-notebook contexts
-    try:
-    except Exception:
-        display = None
-        Image = None
-
     os.makedirs(output_dir, exist_ok=True)
 
     # Helper to save & display image if possible
