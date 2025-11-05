@@ -223,6 +223,9 @@ def create_genre_context_wordclouds(
         print("GENERATING GENRE × CONTEXT WORD CLOUDS")
         print("="*70)
     
+    # token to completely ignore (case-insensitive)
+    IGNORE_TOKEN = "endofasubhere"
+    
     genres = sorted(metadata['genre_code'].unique())
     contexts = sorted(metadata['context_word'].unique())
     
@@ -250,7 +253,17 @@ def create_genre_context_wordclouds(
             subset_tfidf = tfidf_scores_df.iloc[mask.values]
             mean_tfidf = subset_tfidf.mean(axis=0)
             
-            # Get top words
+            # Remove the unwanted token completely (case-insensitive)
+            try:
+                idx_series = mean_tfidf.index.astype(str)
+                mask_ignore = idx_series.str.lower() == IGNORE_TOKEN.lower()
+                if mask_ignore.any():
+                    mean_tfidf = mean_tfidf[~mask_ignore]
+            except Exception:
+                # Fallback: attempt to drop by label if present
+                mean_tfidf = mean_tfidf.drop(labels=[IGNORE_TOKEN], errors='ignore')
+            
+            # Get top words (after removing the ignored token)
             top_words = mean_tfidf.nlargest(top_n_words)
             
             if len(top_words) == 0:
@@ -258,8 +271,16 @@ def create_genre_context_wordclouds(
                 ax.axis('off')
                 continue
             
-            # Create word frequency dictionary for word cloud
+            # Ensure ignored token isn't in the final dict (extra safety)
             word_freq = top_words.to_dict()
+            word_freq.pop(IGNORE_TOKEN, None)
+            # Also pop any case-variants
+            word_freq = {w: v for w, v in word_freq.items() if str(w).lower() != IGNORE_TOKEN.lower()}
+            
+            if len(word_freq) == 0:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
+                ax.axis('off')
+                continue
             
             # Generate word cloud
             wordcloud = WordCloud(
