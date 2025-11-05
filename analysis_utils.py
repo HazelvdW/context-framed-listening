@@ -43,6 +43,8 @@ from scipy import stats
 from scipy.stats import levene
 import matplotlib.pyplot as plt
 import seaborn as sns
+from wordcloud import WordCloud
+from scipy.stats import ttest_ind
 
 
 # ==============================================================================
@@ -176,6 +178,118 @@ def extract_similarity_by_condition(
         print(sim_df_docs['condition'].value_counts().sort_index())
     
     return sim_df_docs
+
+
+# ==============================================================================
+# WORD CLOUD VISUALIZATIONS
+# ==============================================================================
+
+def create_genre_context_wordclouds(
+    tfidf_scores_df: pd.DataFrame,
+    metadata: pd.DataFrame,
+    output_dir: str,
+    model_prefix: str = 'TFIDF',
+    top_n_words: int = 50,
+    figsize: Tuple[int, int] = (20, 16),
+    verbose: bool = True
+) -> plt.Figure:
+    """
+    Create word clouds for each genre × context combination.
+    
+    Parameters
+    ----------
+    tfidf_scores_df : pd.DataFrame
+        TF-IDF scores (rows=docs, cols=terms)
+    metadata : pd.DataFrame
+        Document metadata with genre_code and context_word
+    output_dir : str
+        Directory to save output
+    model_prefix : str
+        Prefix for output filename
+    top_n_words : int
+        Number of top words to include in each word cloud
+    figsize : tuple
+        Figure size
+    verbose : bool
+        Whether to print progress
+        
+    Returns
+    -------
+    plt.Figure
+        The generated figure
+    """
+    if verbose:
+        print("\n" + "="*70)
+        print("GENERATING GENRE × CONTEXT WORD CLOUDS")
+        print("="*70)
+    
+    genres = sorted(metadata['genre_code'].unique())
+    contexts = sorted(metadata['context_word'].unique())
+    
+    fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
+    
+    for i, genre in enumerate(genres):
+        for j, context in enumerate(contexts):
+            ax = axes[i, j]
+            
+            # Get documents for this genre-context combination
+            mask = (metadata['genre_code'] == genre) & (metadata['context_word'] == context)
+            if mask.sum() == 0:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
+                ax.axis('off')
+                continue
+            
+            # Get mean TF-IDF scores for this combination
+            subset_tfidf = tfidf_scores_df[mask]
+            mean_tfidf = subset_tfidf.mean(axis=0)
+            
+            # Get top words
+            top_words = mean_tfidf.nlargest(top_n_words)
+            
+            if len(top_words) == 0:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
+                ax.axis('off')
+                continue
+            
+            # Create word frequency dictionary for word cloud
+            word_freq = top_words.to_dict()
+            
+            # Generate word cloud
+            wordcloud = WordCloud(
+                width=400, height=300,
+                background_color='white',
+                colormap='viridis',
+                relative_scaling=0.5,
+                min_font_size=8
+            ).generate_from_frequencies(word_freq)
+            
+            # Display
+            ax.imshow(wordcloud, interpolation='bilinear')
+            ax.axis('off')
+            
+            # Title
+            if i == 0:
+                ax.set_title(f'{context.upper()}', fontsize=11, fontweight='bold', pad=10)
+            if j == 0:
+                ax.text(-0.1, 0.5, f'{genre.upper()}', 
+                       transform=ax.transAxes, fontsize=11, fontweight='bold',
+                       rotation=90, va='center', ha='right')
+            
+            if verbose and (i * len(contexts) + j + 1) % 4 == 0:
+                print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
+    
+    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score)',
+                fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    
+    output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    if verbose:
+        print(f"\n✓ Saved word clouds to: {output_path}")
+    
+    return fig
 
 
 # ==============================================================================
@@ -494,6 +608,254 @@ def analyze_pairwise_factor_comparisons(
             print(f"  No significant differences found")
 
     return pairs_df
+
+
+def analyze_within_vs_between_factor(
+    sim_df: pd.DataFrame,
+    metadata: pd.DataFrame,
+    factor_column: str,
+    factor_name: str,
+    output_dir: str,
+    model_prefix: str = 'TFIDF',
+    verbose: bool = True
+) -> Tuple[pd.DataFrame, plt.Figure]:
+    """
+    Compare within-factor vs. between-factor similarity with Welch's t-test.
+    
+    Creates violin plots showing:
+    - Between-factor (different levels)
+    - Within-factor (same level, pooled)
+    - Each individual factor level
+    
+    Parameters
+    ----------
+    sim_df : pd.DataFrame
+        Similarity dataframe
+    metadata : pd.DataFrame
+        Document metadata
+    factor_column : str
+        Column name: 'context_word' or 'genre_code'
+    factor_name : str
+        Display name: 'Context' or 'Genre'
+    output_dir : str
+        Directory to save outputs
+    model_prefix : str
+        Prefix for output files
+    verbose : bool
+        Whether to print detailed output
+        
+    Returns
+    -------
+    Tuple[pd.DataFrame, plt.Figure]
+        - results_df: Statistical test results
+        - fig: Generated figure
+    """
+    if verbose:
+        print("\n" + "="*70)
+        print(f"WITHIN VS. BETWEEN {factor_name.upper()} SIMILARITY ANALYSIS")
+        print("="*70)
+    
+    factor_key = get_factor_key(factor_column)
+    factors = sorted(metadata[factor_column].unique())
+    
+    # Collect similarity values
+    within_all = []
+    between_all = []
+    within_by_factor = {f: [] for f in factors}
+    
+    # Extract similarities
+    for idx, row in sim_df.iterrows():
+        factor_i = row[f'{factor_key}_i']
+        factor_j = row[f'{factor_key}_j']
+        sim = row['similarity']
+        
+        if factor_i == factor_j:
+            # Within same factor
+            within_all.append(sim)
+            within_by_factor[factor_i].append(sim)
+        else:
+            # Between different factors
+            between_all.append(sim)
+    
+    # Statistical tests
+    results = []
+    
+    # Overall: Within vs Between
+    t_stat, p_val = ttest_ind(within_all, between_all, equal_var=False)
+    d = compute_cohens_d(pd.Series(within_all), pd.Series(between_all))
+    sig = get_significance_marker(p_val)
+    
+    results.append({
+        'comparison': f'Within vs Between {factor_name}',
+        'group1': f'Within-{factor_name}',
+        'group2': f'Between-{factor_name}',
+        'mean1': np.mean(within_all),
+        'std1': np.std(within_all),
+        'n1': len(within_all),
+        'mean2': np.mean(between_all),
+        'std2': np.std(between_all),
+        'n2': len(between_all),
+        'difference': np.mean(within_all) - np.mean(between_all),
+        't': t_stat,
+        'p': p_val,
+        'sig': sig,
+        'd': d
+    })
+    
+    if verbose:
+        print(f"\nOVERALL COMPARISON:")
+        print(f"  Within-{factor_name}: M={np.mean(within_all):.4f}, SD={np.std(within_all):.4f} (N={len(within_all)})")
+        print(f"  Between-{factor_name}: M={np.mean(between_all):.4f}, SD={np.std(between_all):.4f} (N={len(between_all)})")
+        print(f"  Difference: {np.mean(within_all) - np.mean(between_all):.4f}")
+        print(f"  Welch's t({len(within_all) + len(between_all) - 2}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
+        print(f"  Cohen's d = {d:.3f}")
+    
+    # Individual factors vs Between
+    if verbose:
+        print(f"\nINDIVIDUAL {factor_name.upper()} COMPARISONS:")
+    
+    for factor in factors:
+        within_factor = within_by_factor[factor]
+        if len(within_factor) > 0:
+            t_stat, p_val = ttest_ind(within_factor, between_all, equal_var=False)
+            d = compute_cohens_d(pd.Series(within_factor), pd.Series(between_all))
+            sig = get_significance_marker(p_val)
+            
+            results.append({
+                'comparison': f'{factor} vs Between',
+                'group1': f'Within-{factor}',
+                'group2': f'Between-{factor_name}',
+                'mean1': np.mean(within_factor),
+                'std1': np.std(within_factor),
+                'n1': len(within_factor),
+                'mean2': np.mean(between_all),
+                'std2': np.std(between_all),
+                'n2': len(between_all),
+                'difference': np.mean(within_factor) - np.mean(between_all),
+                't': t_stat,
+                'p': p_val,
+                'sig': sig,
+                'd': d
+            })
+            
+            if verbose:
+                print(f"\n{factor.upper()} vs Between:")
+                print(f"  Within-{factor}: M={np.mean(within_factor):.4f}, SD={np.std(within_factor):.4f} (N={len(within_factor)})")
+                print(f"  Between: M={np.mean(between_all):.4f}, SD={np.std(between_all):.4f} (N={len(between_all)})")
+                print(f"  t = {t_stat:.3f}, p = {p_val:.4f} {sig}, d = {d:.3f}")
+    
+    results_df = pd.DataFrame(results)
+    
+    # Save results
+    csv_path = os.path.join(output_dir, f'{model_prefix}_{factor_key}_within_vs_between.csv')
+    results_df.to_csv(csv_path, index=False)
+    if verbose:
+        print(f"\n✓ Saved results to: {csv_path}")
+    
+    # Create visualization
+    fig = _plot_within_vs_between(
+        within_all, between_all, within_by_factor, factors,
+        factor_name, output_dir, model_prefix, results_df, verbose
+    )
+    
+    return results_df, fig
+
+
+def _plot_within_vs_between(
+    within_all: List[float],
+    between_all: List[float],
+    within_by_factor: Dict[str, List[float]],
+    factors: List[str],
+    factor_name: str,
+    output_dir: str,
+    model_prefix: str,
+    results_df: pd.DataFrame,
+    verbose: bool
+) -> plt.Figure:
+    """Helper function to create within vs between violin plots."""
+    
+    # Prepare data for plotting
+    plot_data = []
+    
+    # Between
+    for sim in between_all:
+        plot_data.append({
+            'similarity': sim,
+            'category': f'Between-{factor_name}',
+            'order': 0
+        })
+    
+    # Within (pooled)
+    for sim in within_all:
+        plot_data.append({
+            'similarity': sim,
+            'category': f'Within-{factor_name}\n(pooled)',
+            'order': 1
+        })
+    
+    # Individual factors
+    for i, factor in enumerate(factors):
+        for sim in within_by_factor[factor]:
+            plot_data.append({
+                'similarity': sim,
+                'category': f'Within-{factor}',
+                'order': 2 + i
+            })
+    
+    plot_df = pd.DataFrame(plot_data)
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(14, 7))
+    
+    # Sort categories by order
+    categories = plot_df.sort_values('order')['category'].unique()
+    
+    # Color palette
+    colors = ['#95a5a6', '#e74c3c'] + ['#3498db', '#2ecc71', '#f39c12', '#9b59b6'][:len(factors)]
+    palette = {cat: colors[i] for i, cat in enumerate(categories)}
+    
+    # Violin plot
+    sns.violinplot(data=plot_df, x='category', y='similarity',
+                   order=categories, palette=palette, ax=ax,
+                   inner='box', linewidth=1.5)
+    
+    ax.set_xlabel('')
+    ax.set_ylabel('Cosine Similarity', fontsize=12)
+    ax.set_title(f'Within vs. Between {factor_name} Similarity\n(Welch\'s t-test comparisons)',
+                fontsize=14, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    ax.set_xticklabels(categories, rotation=45, ha='right', fontsize=10)
+    
+    # Add significance annotations
+    # Between vs Within (pooled)
+    overall_result = results_df.iloc[0]
+    y_max = plot_df['similarity'].max()
+    y_pos = y_max + 0.08
+    
+    ax.plot([0, 1], [y_pos, y_pos], 'k-', linewidth=2)
+    ax.plot([0, 0], [y_pos - 0.01, y_pos], 'k-', linewidth=2)
+    ax.plot([1, 1], [y_pos - 0.01, y_pos], 'k-', linewidth=2)
+    ax.text(0.5, y_pos + 0.01, f"d = {overall_result['d']:.3f} {overall_result['sig']}",
+           ha='center', va='bottom', fontsize=10, fontweight='bold',
+           bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
+    
+    # Add sample sizes
+    for i, cat in enumerate(categories):
+        n = len(plot_df[plot_df['category'] == cat])
+        ax.text(i, -0.05, f'n={n}', ha='center', va='top',
+               transform=ax.get_xaxis_transform(), fontsize=9, style='italic')
+    
+    plt.tight_layout()
+    
+    # Save
+    plot_path = os.path.join(output_dir, f'{model_prefix}_{get_factor_key(factor_name.lower())}_within_vs_between.png')
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    if verbose:
+        print(f"✓ Saved plot to: {plot_path}")
+    
+    return fig
 
 
 def analyze_factor_clip_vs_context(
@@ -2020,7 +2382,7 @@ def _plot_document_tsne(
     
     plot_path = os.path.join(output_dir, f'{model_prefix}_tsne_plot.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
+    plt.show()
     
     if verbose:
         print(f"✓ Saved document t-SNE plot to: {plot_path}")
@@ -2099,7 +2461,7 @@ def _plot_word_tsne(
     
     words_png = os.path.join(output_dir, f'{model_prefix}_word_tsne_top{len(top_terms)}.png')
     plt.savefig(words_png, dpi=300, bbox_inches='tight')
-    plt.close()
+    plt.show()
     
     if verbose:
         print(f"✓ Saved word t-SNE plot to: {words_png}")
