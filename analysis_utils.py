@@ -1255,7 +1255,7 @@ def create_comparative_pairwise_figure(
                     ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
 
     from matplotlib.patches import Patch
-from IPython.display import display, Image
+    from IPython.display import display, Image
     legend_elements = [
         Patch(facecolor='steelblue', edgecolor='black', label='Significant'),
         Patch(facecolor='lightgray', edgecolor='black', label='n.s.')
@@ -2168,6 +2168,14 @@ def generate_all_visualizations(
         print("\n" + "="*70)
         print("GENERATING FACTOR-SPECIFIC VISUALIZATIONS")
         print("="*70)
+
+    # local import to avoid hard dependency for non-notebook contexts
+    try:
+        from IPython.display import display, Image
+    except Exception:
+        display = None
+        Image = None
+    os.makedirs(output_dir, exist_ok=True)
 
     os.makedirs(output_dir, exist_ok=True)
 
