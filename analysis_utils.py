@@ -1255,6 +1255,7 @@ def create_comparative_pairwise_figure(
                     ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
 
     from matplotlib.patches import Patch
+from IPython.display import display, Image
     legend_elements = [
         Patch(facecolor='steelblue', edgecolor='black', label='Significant'),
         Patch(facecolor='lightgray', edgecolor='black', label='n.s.')
@@ -2139,6 +2140,7 @@ def save_similarity_by_condition(
         summary = sim_df.groupby('condition')['similarity'].agg(['count', 'mean', 'std', 'min', 'max'])
         print(summary)
 
+
 def generate_all_visualizations(
     context_within_df: pd.DataFrame,
     genre_within_df: pd.DataFrame,
@@ -2159,106 +2161,139 @@ def generate_all_visualizations(
     verbose: bool = True
 ) -> None:
     """
-    Generate all visualization figures in one call.
-    
-    Parameters
-    ----------
-    All dataframes from the analysis pipeline
-    output_dir : str
-        Directory to save figures
-    model_prefix : str
-        Prefix for output filenames
-    verbose : bool
-        Whether to print progress messages
+    Generate all visualization figures in one call and display them inline
+    (useful when running in a Jupyter notebook). Figures are still saved to disk.
     """
     if verbose:
         print("\n" + "="*70)
         print("GENERATING FACTOR-SPECIFIC VISUALIZATIONS")
         print("="*70)
-    
-    # Acknowledge potentially unused dataframes to avoid static analysis/linter warnings
-    # (they are accepted for API consistency and may be used externally)
-    _ = context_consistency_df
-    _ = genre_consistency_df
 
-    # Figure 1: Within-factor comparison
+    # local import to avoid hard dependency for non-notebook contexts
+    try:
+    except Exception:
+        display = None
+        Image = None
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Helper to save & display image if possible
+    def _call_and_display(func, *args, out_path: str, **kwargs):
+        """Call plotting function, then display saved image if running in notebook."""
+        # Call function (they save and often close the figure internally)
+        try:
+            _ = func(*args, **kwargs)
+        except Exception as e:
+            if verbose:
+                print(f"WARNING: {func.__name__} raised an error: {e}")
+            return
+
+        # Display saved image inline if IPython is available and file exists
+        if display is not None and Image is not None and os.path.exists(out_path):
+            try:
+                display(Image(filename=out_path))
+            except Exception:
+                # fallback to printing path
+                if verbose:
+                    print(f"Saved figure at: {out_path}")
+        else:
+            if verbose:
+                print(f"Saved figure at: {out_path}")
+
+    # Prepare filepaths and call each plotting function, displaying inline when possible
+    # 1. Within-factor comparison
+    out1 = os.path.join(output_dir, f'{model_prefix}_within_factor_comparison.png')
     if verbose:
         print("\n1. Generating within-factor comparison (Context vs. Genre)...")
-    create_comparative_within_factor_figure(
+    _call_and_display(
+        create_comparative_within_factor_figure,
         context_within_df, genre_within_df,
-        os.path.join(output_dir, f'{model_prefix}_within_factor_comparison.png')
+        out_path=out1,
+        output_path=out1
     )
-    
-    # Figure 2: Pairwise comparison
+
+    # 2. Pairwise comparison
+    out2 = os.path.join(output_dir, f'{model_prefix}_pairwise_comparison.png')
     if verbose:
         print("\n2. Generating pairwise comparison (Context vs. Genre)...")
-    create_comparative_pairwise_figure(
+    _call_and_display(
+        create_comparative_pairwise_figure,
         context_pairs_df, genre_pairs_df,
-        os.path.join(output_dir, f'{model_prefix}_pairwise_comparison.png')
+        out_path=out2,
+        output_path=out2
     )
-    
-    # Figure 3: Clip vs. context comparison
+
+    # 3. Clip vs. context comparison
+    out3 = os.path.join(output_dir, f'{model_prefix}_clip_vs_context_comparison.png')
     if verbose:
         print("\n3. Generating clip vs. context comparison (Context vs. Genre)...")
-    create_comparative_clip_vs_context_figure(
+    _call_and_display(
+        create_comparative_clip_vs_context_figure,
         context_moderator_df, genre_moderator_df,
-        os.path.join(output_dir, f'{model_prefix}_clip_vs_context_comparison.png')
+        out_path=out3,
+        output_path=out3
     )
-    
-    # Figure 4: Consistency comparison
+
+    # 4. Consistency comparison
+    out4 = os.path.join(output_dir, f'{model_prefix}_consistency_comparison.png')
     if verbose:
         print("\n4. Generating consistency comparison (Context vs. Genre)...")
-    create_comparative_consistency_figure(
+    _call_and_display(
+        create_comparative_consistency_figure,
         context_consistency_comp_df, genre_consistency_comp_df,
-        os.path.join(output_dir, f'{model_prefix}_consistency_comparison.png')
+        out_path=out4,
+        output_path=out4
     )
-    
-    # Figure 5: Similarity matrices
+
+    # 5. Similarity matrices
+    out5 = os.path.join(output_dir, f'{model_prefix}_similarity_matrices.png')
     if verbose:
         print("\n5. Generating similarity matrices (Context vs. Genre)...")
-    create_similarity_matrices_figure(
+    _call_and_display(
+        create_similarity_matrices_figure,
         context_within_df, genre_within_df, sim_df, metadata,
-        os.path.join(output_dir, f'{model_prefix}_similarity_matrices.png')
+        out_path=out5,
+        output_path=out5
     )
-    
-    # Figure 6: Genre × Context interaction
+
+    # 6. Genre × Context interaction
+    out6 = os.path.join(output_dir, f'{model_prefix}_genre_context_interaction.png')
     if verbose:
         print("\n6. Generating Genre × Context interaction heatmap...")
-    create_genre_context_interaction_heatmap(
+    _call_and_display(
+        create_genre_context_interaction_heatmap,
         genre_context_df,
-        os.path.join(output_dir, f'{model_prefix}_genre_context_interaction.png')
+        out_path=out6,
+        output_path=out6
     )
-    
-    # Figure 7: Primary comparison bar chart
+
+    # 7. Primary comparison bar chart
+    out7 = os.path.join(output_dir, f'{model_prefix}_clip_vs_context.png')
     if verbose:
         print("\n7. Generating primary comparison bar chart...")
-    create_primary_comparison_bar_chart(
+    _call_and_display(
+        create_primary_comparison_bar_chart,
         sim_df, primary_comparison,
-        os.path.join(output_dir, f'{model_prefix}_clip_vs_context.png')
+        out_path=out7,
+        output_path=out7
     )
-    
-    # Figure 8: Comprehensive conditions
+
+    # 8. Comprehensive conditions figure
+    out8 = os.path.join(output_dir, f'{model_prefix}_comprehensive_conditions.png')
     if verbose:
         print("\n8. Generating comprehensive conditions figure...")
-    create_comprehensive_conditions_figure(
+    _call_and_display(
+        create_comprehensive_conditions_figure,
         sim_df, primary_comparison,
-        os.path.join(output_dir, f'{model_prefix}_comprehensive_conditions.png')
+        out_path=out8,
+        output_path=out8
     )
-    
+
     if verbose:
         print("\n" + "="*70)
         print("FACTOR-SPECIFIC VISUALIZATION SUMMARY")
         print("="*70)
-        print("Generated 8 comprehensive figures:")
-        print("  Fig1: Within-factor comparison (2×2: similarity + consistency)")
-        print("  Fig2: Pairwise comparison (1×2: effect sizes)")
-        print("  Fig3: Clip vs. context comparison (2×2: means + effect sizes)")
-        print("  Fig4: Consistency comparison (1×2: clip vs. context CVs)")
-        print("  Fig5: Similarity matrices (1×2: context + genre heatmaps)")
-        print("  Fig6: Genre × Context interaction (heatmap)")
-        print("  Fig7: Primary comparison bar chart (clip vs. context)")
-        print("  Fig8: Comprehensive conditions (3-panel)")
-        print("\nAll context vs. genre comparisons are side-by-side for easy comparison!")
+        print("Generated 8 comprehensive figures (saved and displayed inline if in a notebook).")
         print("="*70)
 
 
