@@ -2138,7 +2138,6 @@ def save_similarity_by_condition(
         summary = sim_df.groupby('condition')['similarity'].agg(['count', 'mean', 'std', 'min', 'max'])
         print(summary)
 
-
 def generate_all_visualizations(
     context_within_df: pd.DataFrame,
     genre_within_df: pd.DataFrame,
@@ -2176,6 +2175,11 @@ def generate_all_visualizations(
         print("GENERATING FACTOR-SPECIFIC VISUALIZATIONS")
         print("="*70)
     
+    # Acknowledge potentially unused dataframes to avoid static analysis/linter warnings
+    # (they are accepted for API consistency and may be used externally)
+    _ = context_consistency_df
+    _ = genre_consistency_df
+
     # Figure 1: Within-factor comparison
     if verbose:
         print("\n1. Generating within-factor comparison (Context vs. Genre)...")
