@@ -35,6 +35,7 @@ Notes
 from typing import Optional, Tuple, Dict, List, Any
 import numpy as np
 import pandas as pd
+import os
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import TruncatedSVD
 from sklearn.manifold import TSNE
