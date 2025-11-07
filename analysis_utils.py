@@ -4,7 +4,7 @@ Consolidated utilities for framed-listening notebooks.
 Purpose
 -------
 This module centralises repeated functions used across the TF-IDF, Word2Vec,
-and BERT notebooks:
+and BERT notebooks at both document and individual thought levels:
  - cosine similarity matrix creation
  - extracting pairwise similarity values and condition labels
  - a set of comparison / analysis helpers (binary and condition comparisons)
@@ -29,7 +29,12 @@ Notes
 - Functions are written to be generic and to accept inputs used in the project
 - All analysis functions now support a 'verbose' parameter for cleaner output
 - High-level wrapper functions automate entire analysis pipelines
+- Supports both document-level and individual thought-level analyses
 - Division by zero is protected throughout
+- Uses snake_case naming convention for conditions
+- Uses "clip" terminology consistently
+- **Statistical Tests**: All t-tests use Welch's t-test (equal_var=False) to account
+  for unequal variances between groups, making the tests more robust and valid
 """
 
 from typing import Optional, Tuple, Dict, List, Any
@@ -89,43 +94,43 @@ def safe_cv(std: float, mean: float) -> float:
 
 def extract_similarity_by_condition(
     cosine_matrix: np.ndarray,
-    METdocs: pd.DataFrame,
+    metadata: pd.DataFrame,
     clip_col: str = "clip_name",
     context_col: str = "context_word",
     genre_col: str = "genre_code",
     verbose: bool = True
 ) -> pd.DataFrame:
     """
-    From a cosine matrix and METdocs metadata, extract the upper-triangle
+    From a cosine matrix and metadata, extract the upper-triangle
     pairs (unique pairs) annotated with boolean indicators and a categorical
     'condition' label.
 
     Parameters
     ----------
     cosine_matrix : np.ndarray
-        Square (n_docs, n_docs) similarity matrix
-    METdocs : pd.DataFrame
+        Square (n_items, n_items) similarity matrix
+    metadata : pd.DataFrame
         Metadata DataFrame aligned with the rows/cols of the cosine_matrix.
         Must contain clip_col, context_col, genre_col.
     clip_col, context_col, genre_col : str
-        Column names in METdocs
+        Column names in metadata
     verbose : bool
         Whether to print progress messages
 
     Returns
     -------
-    sim_df_docs : pd.DataFrame
-        Columns: doc_i, doc_j, similarity, same_clip, same_context,
+    sim_df : pd.DataFrame
+        Columns: item_i, item_j, similarity, same_clip, same_context,
         same_genre, condition
     """
-    n_docs = cosine_matrix.shape[0]
-    clips = METdocs[clip_col].values
-    contexts = METdocs[context_col].values
-    genres = METdocs[genre_col].values
+    n_items = cosine_matrix.shape[0]
+    clips = metadata[clip_col].values
+    contexts = metadata[context_col].values
+    genres = metadata[genre_col].values
 
     records = {
-        "doc_i": [],
-        "doc_j": [],
+        "item_i": [],
+        "item_j": [],
         "similarity": [],
         "same_clip": [],
         "same_context": [],
@@ -134,14 +139,14 @@ def extract_similarity_by_condition(
     }
 
     if verbose:
-        print(f"Extracting similarity by condition from {n_docs} documents...")
-        print(f"Total unique pairs to process: {(n_docs * (n_docs - 1)) // 2}")
+        print(f"Extracting similarity by condition from {n_items} items...")
+        print(f"Total unique pairs to process: {(n_items * (n_items - 1)) // 2}")
 
-    for i in range(n_docs):
-        if verbose and (i + 1) % 10 == 0:
-            print(f"  Processed {i + 1}/{n_docs} documents...")
+    for i in range(n_items):
+        if verbose and (i + 1) % 100 == 0:
+            print(f"  Processed {i + 1}/{n_items} items...")
 
-        for j in range(i + 1, n_docs):
+        for j in range(i + 1, n_items):
             sim = float(cosine_matrix[i, j])
 
             same_clip = clips[i] == clips[j]
@@ -162,22 +167,22 @@ def extract_similarity_by_condition(
                     else "diff_clip_diff_context_diff_genre"
                 )
 
-            records["doc_i"].append(i)
-            records["doc_j"].append(j)
+            records["item_i"].append(i)
+            records["item_j"].append(j)
             records["similarity"].append(sim)
             records["same_clip"].append(same_clip)
             records["same_context"].append(same_context)
             records["same_genre"].append(same_genre)
             records["condition"].append(condition)
 
-    sim_df_docs = pd.DataFrame(records)
+    sim_df = pd.DataFrame(records)
     
     if verbose:
-        print(f"\n✓ Extracted {len(sim_df_docs)} unique pairs")
+        print(f"\n✓ Extracted {len(sim_df)} unique pairs")
         print("\nCondition distribution:")
-        print(sim_df_docs['condition'].value_counts().sort_index())
+        print(sim_df['condition'].value_counts().sort_index())
     
-    return sim_df_docs
+    return sim_df
 
 
 # ==============================================================================
@@ -611,7 +616,7 @@ def compare_conditions(
 ) -> Optional[Dict[str, Any]]:
     """
     Compare two named conditions from sim_df['condition'] with 
-    an independent t-test and Cohen's d.
+    Welch's t-test (unequal variances) and Cohen's d.
 
     Parameters
     ----------
@@ -637,7 +642,7 @@ def compare_conditions(
             print(f"WARNING: Insufficient data for {label1} vs {label2}")
         return None
 
-    t_stat, p_value = stats.ttest_ind(data1, data2)
+    t_stat, p_value = stats.ttest_ind(data1, data2, equal_var=False)
     effect_size = compute_cohens_d(data1, data2)
     sig_str = get_significance_marker(p_value)
 
@@ -683,7 +688,7 @@ def compare_binary(
     same_data = sim_df[sim_df[column] == True]["similarity"]
     diff_data = sim_df[sim_df[column] == False]["similarity"]
 
-    t_stat, p_value = stats.ttest_ind(same_data, diff_data)
+    t_stat, p_value = stats.ttest_ind(same_data, diff_data, equal_var=False)
     effect_size = compute_cohens_d(same_data, diff_data)
     sig_str = get_significance_marker(p_value)
 
@@ -749,7 +754,7 @@ def analyze_within_factor_similarity(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -837,7 +842,7 @@ def analyze_pairwise_factor_comparisons(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -881,7 +886,7 @@ def analyze_pairwise_factor_comparisons(
             ]['similarity']
 
             if len(factor1_sims) > 0 and len(factor2_sims) > 0:
-                t_stat, p_val = stats.ttest_ind(factor1_sims, factor2_sims)
+                t_stat, p_val = stats.ttest_ind(factor1_sims, factor2_sims, equal_var=False)
                 effect_size = compute_cohens_d(factor1_sims, factor2_sims)
                 sig = get_significance_marker(p_val)
 
@@ -1181,7 +1186,7 @@ def analyze_factor_clip_vs_context(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -1236,7 +1241,7 @@ def analyze_factor_clip_vs_context(
         context_sims = sim_df[context_filter]['similarity']
 
         if len(clip_sims) > 0 and len(context_sims) > 0:
-            t_stat, p_val = stats.ttest_ind(clip_sims, context_sims)
+            t_stat, p_val = stats.ttest_ind(clip_sims, context_sims, equal_var=False)
             effect_size = compute_cohens_d(clip_sims, context_sims)
             sig = get_significance_marker(p_val)
 
@@ -1333,7 +1338,7 @@ def analyze_factor_consistency(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -1490,8 +1495,8 @@ def _analyze_clip_context_consistency(
 # ==============================================================================
 
 def run_factor_analysis(
-    sim_df_docs: pd.DataFrame,
-    METdocs: pd.DataFrame,
+    sim_df: pd.DataFrame,
+    metadata: pd.DataFrame,
     factor_column: str,
     factor_name: str,
     output_dir: str,
@@ -1509,9 +1514,9 @@ def run_factor_analysis(
 
     Parameters
     -----------
-    sim_df_docs : pd.DataFrame
-        Similarity dataframe with document pairs
-    METdocs : pd.DataFrame
+    sim_df : pd.DataFrame
+        Similarity dataframe with pairs
+    metadata : pd.DataFrame
         Document metadata
     factor_column : str
         Column name for the factor (e.g., 'context_word', 'genre_code')
@@ -1543,26 +1548,26 @@ def run_factor_analysis(
     factor_col_i = f'{factor_name.lower()}_i'
     factor_col_j = f'{factor_name.lower()}_j'
 
-    if factor_col_i not in sim_df_docs.columns:
-        factor_values = METdocs[factor_column].values
-        sim_df_docs[factor_col_i] = sim_df_docs['doc_i'].map(lambda x: factor_values[x])
-        sim_df_docs[factor_col_j] = sim_df_docs['doc_j'].map(lambda x: factor_values[x])
+    if factor_col_i not in sim_df.columns:
+        factor_values = metadata[factor_column].values
+        sim_df[factor_col_i] = sim_df['item_i'].map(lambda x: factor_values[x])
+        sim_df[factor_col_j] = sim_df['item_j'].map(lambda x: factor_values[x])
 
     # Run all analyses
     within_df = analyze_within_factor_similarity(
-        sim_df_docs, METdocs, factor_column, factor_name, verbose
+        sim_df, metadata, factor_column, factor_name, verbose
     )
 
     pairs_df = analyze_pairwise_factor_comparisons(
-        sim_df_docs, METdocs, factor_column, factor_name, within_df, verbose
+        sim_df, metadata, factor_column, factor_name, within_df, verbose
     )
 
     moderator_df = analyze_factor_clip_vs_context(
-        sim_df_docs, METdocs, factor_column, factor_name, verbose
+        sim_df, metadata, factor_column, factor_name, verbose
     )
 
     consistency_df, consistency_comparison_df = analyze_factor_consistency(
-        sim_df_docs, METdocs, factor_column, factor_name, verbose
+        sim_df, metadata, factor_column, factor_name, verbose
     )
 
     # Save results
@@ -1593,8 +1598,8 @@ def run_factor_analysis(
 
 
 def analyze_genre_context_interaction(
-    sim_df_docs: pd.DataFrame,
-    METdocs: pd.DataFrame,
+    sim_df: pd.DataFrame,
+    metadata: pd.DataFrame,
     output_dir: str,
     model_prefix: str = 'TFIDF',
     verbose: bool = True
@@ -1604,9 +1609,9 @@ def analyze_genre_context_interaction(
 
     Parameters
     -----------
-    sim_df_docs : pd.DataFrame
+    sim_df : pd.DataFrame
         Similarity dataframe with genre and context labels
-    METdocs : pd.DataFrame
+    metadata : pd.DataFrame
         Document metadata
     output_dir : str
         Directory to save output CSV
@@ -1627,15 +1632,15 @@ def analyze_genre_context_interaction(
         print("Do certain genres work better with certain contexts?\n")
 
     genre_context_interaction = []
-    genres = METdocs['genre_code'].unique()
-    contexts = METdocs['context_word'].unique()
+    genres = metadata['genre_code'].unique()
+    contexts = metadata['context_word'].unique()
 
     for genre in genres:
         for context in contexts:
-            specific_sims = sim_df_docs[
-                (sim_df_docs['condition'] == 'diff_clip_same_context') &
-                (sim_df_docs['genre_i'] == genre) &
-                (sim_df_docs['context_i'] == context)
+            specific_sims = sim_df[
+                (sim_df['condition'] == 'diff_clip_same_context') &
+                (sim_df['genre_i'] == genre) &
+                (sim_df['context_i'] == context)
             ]['similarity']
 
             if len(specific_sims) > 0:
@@ -1715,7 +1720,8 @@ def print_consistency_comparison_summary(
         if len(genre_consistency_df) >= 2 and len(context_consistency_df) >= 2:
             t_stat, p_val = stats.ttest_ind(
                 genre_consistency_df['cv'],
-                context_consistency_df['cv']
+                context_consistency_df['cv'],
+                equal_var=False
             )
 
             if p_val < 0.05:
@@ -1922,7 +1928,6 @@ def create_comparative_pairwise_figure(
                     ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
 
     from matplotlib.patches import Patch
-    from IPython.display import display, Image
     legend_elements = [
         Patch(facecolor='steelblue', edgecolor='black', label='Significant'),
         Patch(facecolor='lightgray', edgecolor='black', label='n.s.')
@@ -1939,7 +1944,7 @@ def create_comparative_pairwise_figure(
     return fig
 
 
-def create_comparative_clip_vs_context_figure(
+def create_comparative_clip_vs_context_effects_figure(
     context_moderator_df: pd.DataFrame,
     genre_moderator_df: pd.DataFrame,
     output_path: str,
@@ -2842,8 +2847,7 @@ def generate_all_visualizations(
     except Exception:
         display = None
         Image = None
-    os.makedirs(output_dir, exist_ok=True)
-
+    
     os.makedirs(output_dir, exist_ok=True)
 
     # Helper to save & display image if possible
@@ -2897,7 +2901,7 @@ def generate_all_visualizations(
     if verbose:
         print("\n3. Generating clip vs. context comparison (Context vs. Genre)...")
     _call_and_display(
-        create_comparative_clip_vs_context_figure,
+        create_comparative_clip_vs_context_effects_figure,
         context_moderator_df, genre_moderator_df,
         out_path=out3,
         output_path=out3
@@ -2966,4 +2970,6 @@ def generate_all_visualizations(
         print("="*70)
 
 
-# End of file
+# ==============================================================================
+# END OF FILE
+# ==============================================================================
