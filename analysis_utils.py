@@ -4,7 +4,7 @@ Consolidated utilities for framed-listening notebooks.
 Purpose
 -------
 This module centralises repeated functions used across the TF-IDF, Word2Vec,
-and BERT notebooks:
+and BERT notebooks at both document and individual thought levels:
  - cosine similarity matrix creation
  - extracting pairwise similarity values and condition labels
  - a set of comparison / analysis helpers (binary and condition comparisons)
@@ -29,7 +29,12 @@ Notes
 - Functions are written to be generic and to accept inputs used in the project
 - All analysis functions now support a 'verbose' parameter for cleaner output
 - High-level wrapper functions automate entire analysis pipelines
+- Supports both document-level and individual thought-level analyses
 - Division by zero is protected throughout
+- Uses snake_case naming convention for conditions
+- Uses "clip" terminology consistently
+- **Statistical Tests**: All t-tests use Welch's t-test (equal_var=False) to account
+  for unequal variances between groups, making the tests more robust and valid
 """
 
 from typing import Optional, Tuple, Dict, List, Any
@@ -89,43 +94,43 @@ def safe_cv(std: float, mean: float) -> float:
 
 def extract_similarity_by_condition(
     cosine_matrix: np.ndarray,
-    METdocs: pd.DataFrame,
+    metadata: pd.DataFrame,
     clip_col: str = "clip_name",
     context_col: str = "context_word",
     genre_col: str = "genre_code",
     verbose: bool = True
 ) -> pd.DataFrame:
     """
-    From a cosine matrix and METdocs metadata, extract the upper-triangle
+    From a cosine matrix and metadata, extract the upper-triangle
     pairs (unique pairs) annotated with boolean indicators and a categorical
     'condition' label.
 
     Parameters
     ----------
     cosine_matrix : np.ndarray
-        Square (n_docs, n_docs) similarity matrix
-    METdocs : pd.DataFrame
+        Square (n_items, n_items) similarity matrix
+    metadata : pd.DataFrame
         Metadata DataFrame aligned with the rows/cols of the cosine_matrix.
         Must contain clip_col, context_col, genre_col.
     clip_col, context_col, genre_col : str
-        Column names in METdocs
+        Column names in metadata
     verbose : bool
         Whether to print progress messages
 
     Returns
     -------
-    sim_df_docs : pd.DataFrame
-        Columns: doc_i, doc_j, similarity, same_clip, same_context,
+    sim_df : pd.DataFrame
+        Columns: item_i, item_j, similarity, same_clip, same_context,
         same_genre, condition
     """
-    n_docs = cosine_matrix.shape[0]
-    clips = METdocs[clip_col].values
-    contexts = METdocs[context_col].values
-    genres = METdocs[genre_col].values
+    n_items = cosine_matrix.shape[0]
+    clips = metadata[clip_col].values
+    contexts = metadata[context_col].values
+    genres = metadata[genre_col].values
 
     records = {
-        "doc_i": [],
-        "doc_j": [],
+        "item_i": [],
+        "item_j": [],
         "similarity": [],
         "same_clip": [],
         "same_context": [],
@@ -134,14 +139,14 @@ def extract_similarity_by_condition(
     }
 
     if verbose:
-        print(f"Extracting similarity by condition from {n_docs} documents...")
-        print(f"Total unique pairs to process: {(n_docs * (n_docs - 1)) // 2}")
+        print(f"Extracting similarity by condition from {n_items} items...")
+        print(f"Total unique pairs to process: {(n_items * (n_items - 1)) // 2}")
 
-    for i in range(n_docs):
-        if verbose and (i + 1) % 10 == 0:
-            print(f"  Processed {i + 1}/{n_docs} documents...")
+    for i in range(n_items):
+        if verbose and (i + 1) % 100 == 0:
+            print(f"  Processed {i + 1}/{n_items} items...")
 
-        for j in range(i + 1, n_docs):
+        for j in range(i + 1, n_items):
             sim = float(cosine_matrix[i, j])
 
             same_clip = clips[i] == clips[j]
@@ -162,29 +167,29 @@ def extract_similarity_by_condition(
                     else "diff_clip_diff_context_diff_genre"
                 )
 
-            records["doc_i"].append(i)
-            records["doc_j"].append(j)
+            records["item_i"].append(i)
+            records["item_j"].append(j)
             records["similarity"].append(sim)
             records["same_clip"].append(same_clip)
             records["same_context"].append(same_context)
             records["same_genre"].append(same_genre)
             records["condition"].append(condition)
 
-    sim_df_docs = pd.DataFrame(records)
+    sim_df = pd.DataFrame(records)
     
     if verbose:
-        print(f"\n✓ Extracted {len(sim_df_docs)} unique pairs")
+        print(f"\n✓ Extracted {len(sim_df)} unique pairs")
         print("\nCondition distribution:")
-        print(sim_df_docs['condition'].value_counts().sort_index())
+        print(sim_df['condition'].value_counts().sort_index())
     
-    return sim_df_docs
+    return sim_df
 
 
 # ==============================================================================
 # WORD CLOUD VISUALIZATIONS
 # ==============================================================================
 
-def create_genre_context_wordclouds(
+def create_genre_context_wordclouds_tfidf(
     tfidf_scores_df: pd.DataFrame,
     metadata: pd.DataFrame,
     output_dir: str,
@@ -194,7 +199,7 @@ def create_genre_context_wordclouds(
     verbose: bool = True
 ) -> plt.Figure:
     """
-    Create word clouds for each genre × context combination.
+    Create word clouds for each genre × context combination using TF-IDF scores.
     
     Parameters
     ----------
@@ -220,7 +225,7 @@ def create_genre_context_wordclouds(
     """
     if verbose:
         print("\n" + "="*70)
-        print("GENERATING GENRE × CONTEXT WORD CLOUDS")
+        print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF)")
         print("="*70)
     
     # token to completely ignore (case-insensitive)
@@ -320,6 +325,283 @@ def create_genre_context_wordclouds(
     return fig
 
 
+def create_genre_context_wordclouds_from_text(
+    metadata: pd.DataFrame,
+    text_column: str,
+    output_dir: str,
+    model_prefix: str = 'W2V',
+    top_n_words: int = 50,
+    figsize: Tuple[int, int] = (20, 16),
+    use_tfidf_weights: bool = True,
+    verbose: bool = True
+) -> plt.Figure:
+    """
+    Create word clouds for each genre × context combination from raw text.
+    Works for Word2Vec, BERT, or any model using text data.
+    
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        Document metadata with genre_code, context_word, and text column
+    text_column : str
+        Name of column containing preprocessed text
+    output_dir : str
+        Directory to save output
+    model_prefix : str
+        Prefix for output filename (e.g., 'W2V', 'BERT')
+    top_n_words : int
+        Number of top words to include in each word cloud
+    figsize : tuple
+        Figure size
+    use_tfidf_weights : bool
+        If True, weight words by TF-IDF within each genre-context combo.
+        If False, use simple word frequency counts.
+    verbose : bool
+        Whether to print progress
+        
+    Returns
+    -------
+    plt.Figure
+        The generated figure
+    """
+    if verbose:
+        print("\n" + "="*70)
+        print(f"GENERATING GENRE × CONTEXT WORD CLOUDS ({model_prefix})")
+        print("="*70)
+        if use_tfidf_weights:
+            print("Using TF-IDF weighting within each genre-context combination")
+        else:
+            print("Using raw word frequency counts")
+    
+    # Import nltk for tokenization
+    import nltk
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+    
+    # token to completely ignore (case-insensitive)
+    IGNORE_TOKEN = "endofasubhere"
+    
+    genres = sorted(metadata['genre_code'].unique())
+    contexts = sorted(metadata['context_word'].unique())
+    
+    fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
+    
+    # Normalize axes to a 2D array
+    if len(genres) == 1 and len(contexts) == 1:
+        axes = np.array([[axes]])
+    else:
+        axes = np.atleast_2d(axes)
+    
+    for i, genre in enumerate(genres):
+        for j, context in enumerate(contexts):
+            ax = axes[i, j]
+            
+            # Get documents for this genre-context combination
+            mask = (metadata['genre_code'] == genre) & (metadata['context_word'] == context)
+            
+            if mask.sum() == 0:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
+                ax.axis('off')
+                continue
+            
+            # Combine all text for this combination
+            combined_text = ' '.join(metadata.loc[mask, text_column].astype(str))
+            
+            if not combined_text.strip():
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
+                ax.axis('off')
+                continue
+            
+            # Generate word frequencies
+            if use_tfidf_weights:
+                # Use TF-IDF weighting within this genre-context combo
+                from sklearn.feature_extraction.text import TfidfVectorizer
+                
+                # Get all texts for this combination as a list
+                texts = metadata.loc[mask, text_column].astype(str).tolist()
+                
+                try:
+                    # Create mini TF-IDF vectorizer for this subset
+                    vectorizer = TfidfVectorizer(max_features=500)
+                    tfidf_matrix = vectorizer.fit_transform(texts)
+                    
+                    # Get mean TF-IDF scores across documents
+                    mean_scores = np.asarray(tfidf_matrix.mean(axis=0)).flatten()
+                    terms = vectorizer.get_feature_names_out()
+                    
+                    # Create word frequency dictionary
+                    word_freq = dict(zip(terms, mean_scores))
+                    
+                except Exception as e:
+                    if verbose:
+                        print(f"  Warning: TF-IDF failed for {genre}-{context}, using frequency counts")
+                    # Fallback to simple frequency
+                    from collections import Counter
+                    tokens = nltk.word_tokenize(combined_text.lower())
+                    word_counts = Counter(tokens)
+                    word_freq = dict(word_counts.most_common(500))
+            else:
+                # Use simple word frequency
+                from collections import Counter
+                tokens = nltk.word_tokenize(combined_text.lower())
+                word_counts = Counter(tokens)
+                word_freq = dict(word_counts.most_common(500))
+            
+            # Remove ignored token (case-insensitive)
+            word_freq = {
+                w: v for w, v in word_freq.items() 
+                if str(w).lower() != IGNORE_TOKEN.lower()
+            }
+            
+            # Get top N words
+            sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
+            top_words = dict(sorted_words[:top_n_words])
+            
+            if len(top_words) == 0:
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
+                ax.axis('off')
+                continue
+            
+            # Generate word cloud
+            try:
+                wordcloud = WordCloud(
+                    width=400, height=300,
+                    background_color='white',
+                    colormap='viridis',
+                    relative_scaling=0.5,
+                    min_font_size=8
+                ).generate_from_frequencies(top_words)
+                
+                # Display
+                ax.imshow(wordcloud, interpolation='bilinear')
+                ax.axis('off')
+                
+                # Title
+                if i == 0:
+                    ax.set_title(f'{context.upper()}', fontsize=11, fontweight='bold', pad=10)
+                if j == 0:
+                    ax.text(-0.1, 0.5, f'{genre.upper()}', 
+                           transform=ax.transAxes, fontsize=11, fontweight='bold',
+                           rotation=90, va='center', ha='right')
+            
+            except Exception as e:
+                if verbose:
+                    print(f"  Warning: Failed to generate wordcloud for {genre}-{context}: {e}")
+                ax.text(0.5, 0.5, 'Error', ha='center', va='center', fontsize=12)
+                ax.axis('off')
+            
+            if verbose and (i * len(contexts) + j + 1) % 4 == 0:
+                print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
+    
+    weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
+    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label})',
+                fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    
+    output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    if verbose:
+        print(f"\n✓ Saved word clouds to: {output_path}")
+    
+    return fig
+
+
+def create_genre_context_wordclouds(
+    metadata: pd.DataFrame,
+    output_dir: str,
+    model_prefix: str = 'TFIDF',
+    tfidf_scores_df: Optional[pd.DataFrame] = None,
+    text_column: Optional[str] = None,
+    top_n_words: int = 50,
+    figsize: Tuple[int, int] = (20, 16),
+    use_tfidf_weights: bool = True,
+    verbose: bool = True
+) -> plt.Figure:
+    """
+    Create word clouds for each genre × context combination.
+    Automatically detects whether to use TF-IDF scores or raw text.
+    
+    This is a unified wrapper function that works for all models (TF-IDF, Word2Vec, BERT).
+    
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        Document metadata with genre_code and context_word
+    output_dir : str
+        Directory to save output
+    model_prefix : str
+        Prefix for output filename (e.g., 'TFIDF', 'W2V', 'BERT')
+    tfidf_scores_df : pd.DataFrame, optional
+        TF-IDF scores (rows=docs, cols=terms). If provided, uses TF-IDF method.
+    text_column : str, optional
+        Name of column containing preprocessed text. Required if tfidf_scores_df not provided.
+    top_n_words : int
+        Number of top words to include in each word cloud
+    figsize : tuple
+        Figure size
+    use_tfidf_weights : bool
+        For text-based method: if True, weight words by TF-IDF within each combo.
+        Only applies when using text_column (not tfidf_scores_df).
+    verbose : bool
+        Whether to print progress
+        
+    Returns
+    -------
+    plt.Figure
+        The generated figure
+        
+    Examples
+    --------
+    # For TF-IDF (using pre-computed scores)
+    fig = create_genre_context_wordclouds(
+        metadata=METdocs,
+        output_dir=OUTPUT_DIR,
+        model_prefix='TFIDF',
+        tfidf_scores_df=df_TFIDF_docs
+    )
+    
+    # For Word2Vec or BERT (using raw text)
+    fig = create_genre_context_wordclouds(
+        metadata=METdocs,
+        output_dir=OUTPUT_DIR,
+        model_prefix='W2V',
+        text_column='METdescr_prepLVL2',
+        use_tfidf_weights=True  # or False for simple frequency
+    )
+    """
+    if tfidf_scores_df is not None:
+        # Use TF-IDF-specific method
+        return create_genre_context_wordclouds_tfidf(
+            tfidf_scores_df=tfidf_scores_df,
+            metadata=metadata,
+            output_dir=output_dir,
+            model_prefix=model_prefix,
+            top_n_words=top_n_words,
+            figsize=figsize,
+            verbose=verbose
+        )
+    elif text_column is not None:
+        # Use text-based method (for Word2Vec, BERT, etc.)
+        return create_genre_context_wordclouds_from_text(
+            metadata=metadata,
+            text_column=text_column,
+            output_dir=output_dir,
+            model_prefix=model_prefix,
+            top_n_words=top_n_words,
+            figsize=figsize,
+            use_tfidf_weights=use_tfidf_weights,
+            verbose=verbose
+        )
+    else:
+        raise ValueError(
+            "Must provide either 'tfidf_scores_df' (for TF-IDF) or 'text_column' (for Word2Vec/BERT)"
+        )
+
+
 # ==============================================================================
 # STATISTICAL COMPARISONS
 # ==============================================================================
@@ -334,7 +616,7 @@ def compare_conditions(
 ) -> Optional[Dict[str, Any]]:
     """
     Compare two named conditions from sim_df['condition'] with 
-    an independent t-test and Cohen's d.
+    Welch's t-test (unequal variances) and Cohen's d.
 
     Parameters
     ----------
@@ -360,7 +642,7 @@ def compare_conditions(
             print(f"WARNING: Insufficient data for {label1} vs {label2}")
         return None
 
-    t_stat, p_value = stats.ttest_ind(data1, data2)
+    t_stat, p_value = stats.ttest_ind(data1, data2, equal_var=False)
     effect_size = compute_cohens_d(data1, data2)
     sig_str = get_significance_marker(p_value)
 
@@ -406,7 +688,7 @@ def compare_binary(
     same_data = sim_df[sim_df[column] == True]["similarity"]
     diff_data = sim_df[sim_df[column] == False]["similarity"]
 
-    t_stat, p_value = stats.ttest_ind(same_data, diff_data)
+    t_stat, p_value = stats.ttest_ind(same_data, diff_data, equal_var=False)
     effect_size = compute_cohens_d(same_data, diff_data)
     sig_str = get_significance_marker(p_value)
 
@@ -434,7 +716,7 @@ def compare_binary(
 
 def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[str, Any]]:
     """
-    Run all three standard binary comparisons (Clip, Context, Genre).
+    Run all three standard binary comparisons (Clip, Genre, Context).
     
     Returns
     -------
@@ -447,7 +729,7 @@ def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[
         print("="*70)
     
     results = []
-    for col, label in [('same_clip', 'Clip'), ('same_context', 'Context'), ('same_genre', 'Genre')]:
+    for col, label in [('same_clip', 'Clip'), ('same_genre', 'Genre'), ('same_context', 'Context')]:
         results.append(compare_binary(sim_df, col, label, verbose=verbose))
     
     return results
@@ -472,7 +754,7 @@ def analyze_within_factor_similarity(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -560,7 +842,7 @@ def analyze_pairwise_factor_comparisons(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -604,7 +886,7 @@ def analyze_pairwise_factor_comparisons(
             ]['similarity']
 
             if len(factor1_sims) > 0 and len(factor2_sims) > 0:
-                t_stat, p_val = stats.ttest_ind(factor1_sims, factor2_sims)
+                t_stat, p_val = stats.ttest_ind(factor1_sims, factor2_sims, equal_var=False)
                 effect_size = compute_cohens_d(factor1_sims, factor2_sims)
                 sig = get_significance_marker(p_val)
 
@@ -904,7 +1186,7 @@ def analyze_factor_clip_vs_context(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -959,7 +1241,7 @@ def analyze_factor_clip_vs_context(
         context_sims = sim_df[context_filter]['similarity']
 
         if len(clip_sims) > 0 and len(context_sims) > 0:
-            t_stat, p_val = stats.ttest_ind(clip_sims, context_sims)
+            t_stat, p_val = stats.ttest_ind(clip_sims, context_sims, equal_var=False)
             effect_size = compute_cohens_d(clip_sims, context_sims)
             sig = get_significance_marker(p_val)
 
@@ -1056,7 +1338,7 @@ def analyze_factor_consistency(
     sim_df : pd.DataFrame
         Similarity dataframe
     metadata : pd.DataFrame
-        METdocs dataframe
+        Metadata dataframe
     factor_column : str
         Column name: 'context_word' or 'genre_code'
     factor_name : str
@@ -1213,8 +1495,8 @@ def _analyze_clip_context_consistency(
 # ==============================================================================
 
 def run_factor_analysis(
-    sim_df_docs: pd.DataFrame,
-    METdocs: pd.DataFrame,
+    sim_df: pd.DataFrame,
+    metadata: pd.DataFrame,
     factor_column: str,
     factor_name: str,
     output_dir: str,
@@ -1232,9 +1514,9 @@ def run_factor_analysis(
 
     Parameters
     -----------
-    sim_df_docs : pd.DataFrame
-        Similarity dataframe with document pairs
-    METdocs : pd.DataFrame
+    sim_df : pd.DataFrame
+        Similarity dataframe with pairs
+    metadata : pd.DataFrame
         Document metadata
     factor_column : str
         Column name for the factor (e.g., 'context_word', 'genre_code')
@@ -1266,26 +1548,26 @@ def run_factor_analysis(
     factor_col_i = f'{factor_name.lower()}_i'
     factor_col_j = f'{factor_name.lower()}_j'
 
-    if factor_col_i not in sim_df_docs.columns:
-        factor_values = METdocs[factor_column].values
-        sim_df_docs[factor_col_i] = sim_df_docs['doc_i'].map(lambda x: factor_values[x])
-        sim_df_docs[factor_col_j] = sim_df_docs['doc_j'].map(lambda x: factor_values[x])
+    if factor_col_i not in sim_df.columns:
+        factor_values = metadata[factor_column].values
+        sim_df[factor_col_i] = sim_df['item_i'].map(lambda x: factor_values[x])
+        sim_df[factor_col_j] = sim_df['item_j'].map(lambda x: factor_values[x])
 
     # Run all analyses
     within_df = analyze_within_factor_similarity(
-        sim_df_docs, METdocs, factor_column, factor_name, verbose
+        sim_df, metadata, factor_column, factor_name, verbose
     )
 
     pairs_df = analyze_pairwise_factor_comparisons(
-        sim_df_docs, METdocs, factor_column, factor_name, within_df, verbose
+        sim_df, metadata, factor_column, factor_name, within_df, verbose
     )
 
     moderator_df = analyze_factor_clip_vs_context(
-        sim_df_docs, METdocs, factor_column, factor_name, verbose
+        sim_df, metadata, factor_column, factor_name, verbose
     )
 
     consistency_df, consistency_comparison_df = analyze_factor_consistency(
-        sim_df_docs, METdocs, factor_column, factor_name, verbose
+        sim_df, metadata, factor_column, factor_name, verbose
     )
 
     # Save results
@@ -1316,8 +1598,8 @@ def run_factor_analysis(
 
 
 def analyze_genre_context_interaction(
-    sim_df_docs: pd.DataFrame,
-    METdocs: pd.DataFrame,
+    sim_df: pd.DataFrame,
+    metadata: pd.DataFrame,
     output_dir: str,
     model_prefix: str = 'TFIDF',
     verbose: bool = True
@@ -1327,9 +1609,9 @@ def analyze_genre_context_interaction(
 
     Parameters
     -----------
-    sim_df_docs : pd.DataFrame
+    sim_df : pd.DataFrame
         Similarity dataframe with genre and context labels
-    METdocs : pd.DataFrame
+    metadata : pd.DataFrame
         Document metadata
     output_dir : str
         Directory to save output CSV
@@ -1350,15 +1632,15 @@ def analyze_genre_context_interaction(
         print("Do certain genres work better with certain contexts?\n")
 
     genre_context_interaction = []
-    genres = METdocs['genre_code'].unique()
-    contexts = METdocs['context_word'].unique()
+    genres = metadata['genre_code'].unique()
+    contexts = metadata['context_word'].unique()
 
     for genre in genres:
         for context in contexts:
-            specific_sims = sim_df_docs[
-                (sim_df_docs['condition'] == 'diff_clip_same_context') &
-                (sim_df_docs['genre_i'] == genre) &
-                (sim_df_docs['context_i'] == context)
+            specific_sims = sim_df[
+                (sim_df['condition'] == 'diff_clip_same_context') &
+                (sim_df['genre_i'] == genre) &
+                (sim_df['context_i'] == context)
             ]['similarity']
 
             if len(specific_sims) > 0:
@@ -1438,7 +1720,8 @@ def print_consistency_comparison_summary(
         if len(genre_consistency_df) >= 2 and len(context_consistency_df) >= 2:
             t_stat, p_val = stats.ttest_ind(
                 genre_consistency_df['cv'],
-                context_consistency_df['cv']
+                context_consistency_df['cv'],
+                equal_var=False
             )
 
             if p_val < 0.05:
@@ -1645,7 +1928,6 @@ def create_comparative_pairwise_figure(
                     ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
 
     from matplotlib.patches import Patch
-    from IPython.display import display, Image
     legend_elements = [
         Patch(facecolor='steelblue', edgecolor='black', label='Significant'),
         Patch(facecolor='lightgray', edgecolor='black', label='n.s.')
@@ -1662,7 +1944,7 @@ def create_comparative_pairwise_figure(
     return fig
 
 
-def create_comparative_clip_vs_context_figure(
+def create_comparative_clip_vs_context_effects_figure(
     context_moderator_df: pd.DataFrame,
     genre_moderator_df: pd.DataFrame,
     output_path: str,
@@ -2238,8 +2520,8 @@ def create_binary_comparisons_figure(
     
     comparisons = [
         ('same_clip', 'Clip', ['#95a5a6', '#3498db'], binary_results[0]),
-        ('same_context', 'Context', ['#e74c3c', '#95a5a6'], binary_results[1]),
-        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6'], binary_results[2])
+        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6'], binary_results[2]),
+        ('same_context', 'Context', ['#e74c3c', '#95a5a6'], binary_results[1])
     ]
     
     for ax, (col, label, palette, result) in zip(axes, comparisons):
@@ -2565,8 +2847,7 @@ def generate_all_visualizations(
     except Exception:
         display = None
         Image = None
-    os.makedirs(output_dir, exist_ok=True)
-
+    
     os.makedirs(output_dir, exist_ok=True)
 
     # Helper to save & display image if possible
@@ -2620,7 +2901,7 @@ def generate_all_visualizations(
     if verbose:
         print("\n3. Generating clip vs. context comparison (Context vs. Genre)...")
     _call_and_display(
-        create_comparative_clip_vs_context_figure,
+        create_comparative_clip_vs_context_effects_figure,
         context_moderator_df, genre_moderator_df,
         out_path=out3,
         output_path=out3
@@ -2689,4 +2970,6 @@ def generate_all_visualizations(
         print("="*70)
 
 
-# End of file
+# ==============================================================================
+# END OF FILE
+# ==============================================================================
