@@ -716,7 +716,7 @@ def compare_binary(
 
 def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[str, Any]]:
     """
-    Run all three standard binary comparisons (Clip, Context, Genre).
+    Run all three standard binary comparisons (Clip, Genre, Context).
     
     Returns
     -------
@@ -729,7 +729,7 @@ def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[
         print("="*70)
     
     results = []
-    for col, label in [('same_clip', 'Clip'), ('same_context', 'Context'), ('same_genre', 'Genre')]:
+    for col, label in [('same_clip', 'Clip'), ('same_genre', 'Genre'), ('same_context', 'Context')]:
         results.append(compare_binary(sim_df, col, label, verbose=verbose))
     
     return results
@@ -2520,8 +2520,8 @@ def create_binary_comparisons_figure(
     
     comparisons = [
         ('same_clip', 'Clip', ['#95a5a6', '#3498db'], binary_results[0]),
-        ('same_context', 'Context', ['#e74c3c', '#95a5a6'], binary_results[1]),
-        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6'], binary_results[2])
+        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6'], binary_results[2]),
+        ('same_context', 'Context', ['#e74c3c', '#95a5a6'], binary_results[1])
     ]
     
     for ax, (col, label, palette, result) in zip(axes, comparisons):
