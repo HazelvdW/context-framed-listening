@@ -1,0 +1,3 @@
+Comparison,Condition 1,Mean 1,Condition 2,Mean 2,Difference,Cohen's d,p-value,Sig.
+Music vs. Context (Primary),"Same Clip, Diff Context",0.4226,"Diff Clip, Same Context",0.3540,0.0686,1.504,0.0000,***
+Genre Effect (Both Differ),"Same Genre, Both Differ",0.3632,"Diff Genre, Both Differ",0.3352,0.0280,0.671,0.0000,***
