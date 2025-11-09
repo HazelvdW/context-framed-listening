@@ -1120,18 +1120,17 @@ def _plot_within_vs_between(
     # Sort categories by order
     categories = plot_df.sort_values('order')['category'].unique()
     
-    # Decide color for the pooled "Within" based on factor_name
-    # If analyzing Genre -> pooled within should be green; if Context -> red
+    # Decide colors based on factor_name
     if factor_name.strip().lower() == 'genre':
         pooled_within_color = '#2ecc71'  # green
+        individual_color = '#bdeec0'     # light green for individual genres
     else:
-        pooled_within_color = '#e74c3c'  # red (same as before for context)
-    
-    # Lilac / palatine-like purple for the individual factor bars
-    lilac = '#b39ddc'
-    
-    # Build color list: Between (gray), pooled within (green or red), then lilac repeated for each factor
-    base_colors = ['#95a5a6', pooled_within_color] + [lilac] * len(factors)
+        pooled_within_color = '#e74c3c'  # red
+        individual_color = '#f7b2b2'     # light red for individual contexts
+
+    between_color = '#95a5a6'  # gray for Between
+    # Build color list: Between (gray), pooled within (green/red), then individual factor colors
+    base_colors = [between_color, pooled_within_color] + [individual_color] * len(factors)
     palette = {cat: base_colors[i] for i, cat in enumerate(categories)}
     
     # Violin plot
