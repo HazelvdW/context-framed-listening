@@ -2570,6 +2570,7 @@ def run_tsne_analysis(
     do_word_tsne: bool = False,
     tfidf_scores_df: Optional[pd.DataFrame] = None,
     top_n_words: int = 500,
+    ignore_words: Optional[List[str]] = None,
     verbose: bool = True
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     """
@@ -2599,6 +2600,8 @@ def run_tsne_analysis(
         TF-IDF scores dataframe for word-level t-SNE (rows=docs, cols=terms)
     top_n_words : int
         Number of top words to include in word t-SNE
+    ignore_words : list of str, optional
+        Words to ignore/filter out from analysis (default: ['endofasubhere'])
     verbose : bool
         Whether to print progress messages
         
@@ -2612,6 +2615,25 @@ def run_tsne_analysis(
         print("\n" + "="*70)
         print(f"t-SNE ANALYSIS ({model_prefix})")
         print("="*70)
+    
+    # Default words to ignore
+    if ignore_words is None:
+        ignore_words = ['endofasubhere']
+    
+    # Convert to lowercase for case-insensitive matching
+    ignore_words_lower = [w.lower() for w in ignore_words]
+    
+    # Filter ignored words from tfidf_scores_df if provided (for word-level t-SNE)
+    if tfidf_scores_df is not None:
+        original_cols = len(tfidf_scores_df.columns)
+        # Filter columns (case-insensitive)
+        cols_to_keep = [col for col in tfidf_scores_df.columns 
+                       if str(col).lower() not in ignore_words_lower]
+        tfidf_scores_df = tfidf_scores_df[cols_to_keep]
+        
+        if verbose and len(cols_to_keep) < original_cols:
+            removed = original_cols - len(cols_to_keep)
+            print(f"Filtered {removed} ignored word(s) from TF-IDF scores: {ignore_words}")
     
     # Convert to dense if sparse
     if hasattr(embedding_matrix, "toarray"):
