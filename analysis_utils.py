@@ -2517,39 +2517,64 @@ def create_binary_comparisons_figure(
 ) -> plt.Figure:
     """
     Create figure showing all three binary comparisons side-by-side.
-    
-    Parameters
-    ----------
-    sim_df : pd.DataFrame
-        Similarity dataframe
-    binary_results : list of dict
-        Results from binary_comparisons() function
+
+    This version matches effect-label annotations to plots by searching the
+    binary_results for the human label (Clip/Genre/Context) instead of relying
+    on list ordering, preventing mix-ups when the caller provides results in a
+    different order or some entries are None.
     """
     fig, axes = plt.subplots(1, 3, figsize=figsize)
-    
-    comparisons = [
-        ('same_clip', 'Clip', ['#95a5a6', '#3498db'], binary_results[0]),
-        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6'], binary_results[2]),
-        ('same_context', 'Context', ['#e74c3c', '#95a5a6'], binary_results[1])
+
+    comparisons_meta = [
+        ('same_clip', 'Clip', ['#3498db', '#95a5a6']),
+        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6']),
+        ('same_context', 'Context', ['#e74c3c', '#95a5a6']),
     ]
-    
-    for ax, (col, label, palette, result) in zip(axes, comparisons):
+
+    # helper to find matching result for a given human label
+    def _find_result_for_label(results, label):
+        if results is None:
+            return None
+        # if results is a dict potentially keyed by column/label
+        if isinstance(results, dict):
+            return results.get(label) or results.get(label.lower()) or results.get('same_' + label.lower())
+        # otherwise search list entries for the label appearing in the 'comparison' string
+        for r in results:
+            if r is None:
+                continue
+            comp = str(r.get('comparison', '')).lower()
+            if label.lower() in comp:
+                return r
+        return None
+
+    for ax, (col, label, palette) in zip(axes, comparisons_meta):
         data = sim_df.copy()
-        data['label'] = data[col].map({True: f'Same {label}', False: f'Different {label}'})
-        
-        sns.violinplot(data=data, x='label', y='similarity', ax=ax,
-                      order=[f'Same {label}', f'Different {label}'],
-                      hue='label', palette=palette, legend=False)
-        
+        # robust labeling even if column uses ints/strings/bools
+        data['label'] = np.where(data[col].astype(bool), f'Same {label}', f'Different {label}')
+
+        order = [f'Same {label}', f'Different {label}']
+        sns.violinplot(
+            data=data, x='label', y='similarity', ax=ax,
+            order=order, palette=palette, inner='box', linewidth=1.2
+        )
+
         ax.set_title(f'{label} Effect', fontsize=13, fontweight='bold')
         ax.set_xlabel('')
-        ax.set_ylabel('Cosine Similarity' if ax == axes[0] else '', fontsize=11)
-        
-        # Add effect size annotation
-        ax.text(0.5, 0.95, f"d = {result['d']:.3f} {result['sig']}",
-               ha='center', va='top', transform=ax.transAxes, fontsize=10,
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
+        ax.set_ylabel('Cosine Similarity' if ax is axes[0] else '', fontsize=11)
+
+        # find and annotate the matching result (if any)
+        result = _find_result_for_label(binary_results, label)
+        if result is not None:
+            try:
+                ax.text(
+                    0.5, 0.95, f"d = {result['d']:.3f} {result['sig']}",
+                    ha='center', va='top', transform=ax.transAxes, fontsize=10,
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.6)
+                )
+            except Exception:
+                # fail silently if fields missing
+                pass
+
     plt.tight_layout()
     return fig
 
