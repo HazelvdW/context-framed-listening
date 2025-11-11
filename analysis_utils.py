@@ -205,6 +205,7 @@ def create_genre_context_wordclouds_tfidf(
     - Larger font for context and genre labels
     - Map short genre codes to full names for display (applied only to plot labels)
     - Use a green colormap (light green -> dark green) where darkest = largest score
+    - Place genre labels to the left of each row (like context titles are used for columns)
     """
     if verbose:
         print("\n" + "="*70)
@@ -300,21 +301,26 @@ def create_genre_context_wordclouds_tfidf(
             ax.imshow(wordcloud, interpolation='bilinear')
             ax.axis('off')
 
-            # Title (context) - larger font
+            # Title (context) - larger font (only for top row)
             if i == 0:
                 ax.set_title(f'{context.upper()}', fontsize=20, fontweight='bold', pad=12)
-            # Genre label on the left column (full name mapping) - apply only to plot label (y-axis)
+
+            # Genre label on the left column (full name mapping) - place as a left-side horizontal label
             if j == 0:
                 display_genre = display_genres[i]
-                # Use set_ylabel so we don't modify the underlying dataset
-                ax.set_ylabel(display_genre, fontsize=20, fontweight='bold', rotation=90, labelpad=18, va='center')
+                # Place the genre label to the left of the subplot, horizontally, centered vertically.
+                ax.set_ylabel(display_genre, fontsize=18, fontweight='bold', rotation=0)
+                # Move the ylabel slightly to the left so it doesn't overlap the axes
+                ax.yaxis.set_label_coords(-0.12, 0.5)
 
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
+    # Leave room on the left for genre labels and on top for the suptitle
+    fig.subplots_adjust(left=0.12, top=0.94)
     plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score)',
                 fontsize=24, fontweight='bold', y=0.995)
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
 
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -343,6 +349,7 @@ def create_genre_context_wordclouds_from_text(
     - Larger font for context and genre labels
     - Map short genre codes to full names for display (applied only to plot labels)
     - Use a green colormap (light green -> dark green) where darkest = largest frequency/score
+    - Place genre labels to the left of each row (like context titles are used for columns)
     """
     if verbose:
         print("\n" + "="*70)
@@ -475,13 +482,14 @@ def create_genre_context_wordclouds_from_text(
                 ax.imshow(wordcloud, interpolation='bilinear')
                 ax.axis('off')
 
-                # Title (context) - larger font
+                # Title (context) - larger font (only for top row)
                 if i == 0:
                     ax.set_title(f'{context.upper()}', fontsize=20, fontweight='bold', pad=12)
-                # Genre label on the left column (full name mapping) - apply only to plot label (y-axis)
+                # Genre label on the left column (full name mapping) - place as a left-side horizontal label
                 if j == 0:
                     display_genre = display_genres[i]
-                    ax.set_ylabel(display_genre, fontsize=20, fontweight='bold', rotation=90, labelpad=18, va='center')
+                    ax.set_ylabel(display_genre, fontsize=18, fontweight='bold', rotation=0)
+                    ax.yaxis.set_label_coords(-0.12, 0.5)
 
             except Exception as e:
                 if verbose:
@@ -492,10 +500,12 @@ def create_genre_context_wordclouds_from_text(
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
+    # Leave room on the left for genre labels and on top for the suptitle
+    fig.subplots_adjust(left=0.12, top=0.94)
     weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
     plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label})',
                 fontsize=24, fontweight='bold', y=0.995)
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
 
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
