@@ -333,7 +333,7 @@ def create_genre_context_wordclouds_tfidf(
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
-    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; Colour = black (high) to grey (low))',
+    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; Darker = higher value)',
                 fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
 
@@ -524,7 +524,7 @@ def create_genre_context_wordclouds_from_text(
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
     weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
-    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label}; Colour = black (high) to grey (low))',
+    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label}; Darker = higher value)',
                 fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
 
