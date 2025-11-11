@@ -208,7 +208,7 @@ def create_genre_context_wordclouds_tfidf(
     """
     if verbose:
         print("\n" + "="*70)
-        print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF, GREEN-PURPLE COLOURS)")
+        print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF, GRAYSCALE)")
         print("="*70)
 
     # Make a local copy of metadata and rename genre codes
@@ -219,11 +219,12 @@ def create_genre_context_wordclouds_tfidf(
         print(f"Original genres: {sorted(metadata['genre_code'].unique())}")
     
     if 'genre_code' in metadata_local.columns:
-        # Apply replacement
-        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().replace({
+        # Apply replacement - handle both upper and lower case
+        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().str.upper().replace({
             'JAZ': 'JAZZ',
             'MET': 'METAL',
-            'ELE': 'ELECTRONIC'
+            'ELE': 'ELECTRONIC',
+            '80S': '80S'  # Keep as is
         })
     
     # Debug: print unique genres after renaming
@@ -286,38 +287,30 @@ def create_genre_context_wordclouds_tfidf(
                 ax.axis('off')
                 continue
 
-            # Build a custom green-to-purple color function for better visibility
-            from matplotlib import cm, colors as mcolors
+            # Build a grayscale color function: black for high values, light grey for low values
+            from matplotlib import colors as mcolors
 
             vals = np.array(list(word_freq.values()), dtype=float)
             vmin, vmax = float(vals.min()), float(vals.max())
-            
-            # Use viridis but shift to start from green (index 0.25) instead of purple (index 0)
-            # This gives us: green -> cyan -> blue -> purple for low to high values
-            cmap = cm.get_cmap('viridis')
 
             if np.isclose(vmin, vmax):
                 # constant colour if all values equal
                 def color_func(word, **kwargs):
-                    rgba = cmap(0.6)  # Mid-range color
-                    return mcolors.to_hex(rgba)
+                    return '#404040'  # Medium grey
             else:
-                # Shift colormap to start from 0.25 (green) to 1.0 (yellow) for better visibility
-                def norm_shifted(val):
-                    """Normalize value and shift to green-yellow range of viridis"""
-                    normalized = (val - vmin) / (vmax - vmin)
-                    return 0.25 + (normalized * 0.75)  # Maps to viridis[0.25:1.0]
-                
+                # Map values to grayscale: high values → black (0.0), low values → light grey (0.7)
                 def color_func(word, **kwargs):
                     val = word_freq.get(word, vmin)
-                    rgba = cmap(norm_shifted(val))
-                    return mcolors.to_hex(rgba)
+                    # Normalize to 0-1, then invert (high val → low grey val → darker)
+                    normalized = (val - vmin) / (vmax - vmin)
+                    grey_val = 0.7 - (normalized * 0.7)  # Maps 0→0.7 (light grey), 1→0.0 (black)
+                    grey_hex = mcolors.to_hex([grey_val, grey_val, grey_val])
+                    return grey_hex
 
             # Generate word cloud and recolor by value
             wordcloud = WordCloud(
                 width=400, height=300,
                 background_color='white',
-                colormap='viridis',  # fallback, actual per-word color applied by recolor
                 relative_scaling=0.5,
                 min_font_size=8
             ).generate_from_frequencies(word_freq)
@@ -340,7 +333,7 @@ def create_genre_context_wordclouds_tfidf(
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
-    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; Colour = green-yellow-purple by value)',
+    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; Colour = black (high) to grey (low))',
                 fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
 
@@ -374,7 +367,7 @@ def create_genre_context_wordclouds_from_text(
     """
     if verbose:
         print("\n" + "="*70)
-        print(f"GENERATING GENRE × CONTEXT WORD CLOUDS ({model_prefix}, GREEN-PURPLE COLOURS)")
+        print(f"GENERATING GENRE × CONTEXT WORD CLOUDS ({model_prefix}, GRAYSCALE)")
         print("="*70)
         if use_tfidf_weights:
             print("Using TF-IDF weighting within each genre-context combination")
@@ -389,11 +382,12 @@ def create_genre_context_wordclouds_from_text(
         print(f"Original genres: {sorted(metadata['genre_code'].unique())}")
     
     if 'genre_code' in metadata_local.columns:
-        # Apply replacement with strip to handle whitespace
-        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().replace({
+        # Apply replacement with strip to handle whitespace - handle both upper and lower case
+        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().str.upper().replace({
             'JAZ': 'JAZZ',
             'MET': 'METAL',
-            'ELE': 'ELECTRONIC'
+            'ELE': 'ELECTRONIC',
+            '80S': '80s'  # Keep 80s as is
         })
     
     # Debug: print unique genres after renaming
@@ -478,35 +472,30 @@ def create_genre_context_wordclouds_from_text(
                 ax.axis('off')
                 continue
 
-            # Build custom green-to-purple color function for better visibility
-            from matplotlib import cm, colors as mcolors
+            # Build grayscale color function: black for high values, light grey for low values
+            from matplotlib import colors as mcolors
 
             vals = np.array(list(top_words.values()), dtype=float)
             vmin, vmax = float(vals.min()), float(vals.max())
-            cmap = cm.get_cmap('viridis')
 
             if np.isclose(vmin, vmax):
                 def color_func(word, **kwargs):
-                    rgba = cmap(0.6)
-                    return mcolors.to_hex(rgba)
+                    return '#404040'  # Medium grey
             else:
-                # Shift colormap to start from 0.25 (green) to 1.0 (yellow) for better visibility
-                def norm_shifted(val):
-                    """Normalize value and shift to green-yellow range of viridis"""
-                    normalized = (val - vmin) / (vmax - vmin)
-                    return 0.25 + (normalized * 0.75)  # Maps to viridis[0.25:1.0]
-                
+                # Map values to grayscale: high values → black (0.0), low values → light grey (0.7)
                 def color_func(word, **kwargs):
                     val = top_words.get(word, vmin)
-                    rgba = cmap(norm_shifted(val))
-                    return mcolors.to_hex(rgba)
+                    # Normalize to 0-1, then invert (high val → low grey val → darker)
+                    normalized = (val - vmin) / (vmax - vmin)
+                    grey_val = 0.7 - (normalized * 0.7)  # Maps 0→0.7 (light grey), 1→0.0 (black)
+                    grey_hex = mcolors.to_hex([grey_val, grey_val, grey_val])
+                    return grey_hex
 
             # Generate word cloud and recolor by value
             try:
                 wordcloud = WordCloud(
                     width=400, height=300,
                     background_color='white',
-                    colormap='viridis',  # fallback
                     relative_scaling=0.5,
                     min_font_size=8
                 ).generate_from_frequencies(top_words)
@@ -535,7 +524,7 @@ def create_genre_context_wordclouds_from_text(
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
     weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
-    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label}; Colour = green-yellow-purple by value)',
+    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label}; Colour = black (high) to grey (low))',
                 fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
 
