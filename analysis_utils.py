@@ -201,25 +201,34 @@ def create_genre_context_wordclouds_tfidf(
     """
     Create word clouds for each genre × context combination using TF-IDF scores.
 
-    This version temporarily renames genres in metadata:
+    This version renames genres in metadata:
       JAZ -> JAZZ, MET -> METAL, ELE -> ELECTRONIC
 
-    Words are colored using the viridis colormap according to their TF-IDF value
-    (largest -> brightest in the colormap).
+    Words are colored using a custom green-to-purple colormap for better visibility.
     """
     if verbose:
         print("\n" + "="*70)
-        print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF, VIRIDIS COLOURS)")
+        print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF, GREEN-PURPLE COLOURS)")
         print("="*70)
 
-    # Make a local copy of metadata and rename genre codes temporarily
+    # Make a local copy of metadata and rename genre codes
     metadata_local = metadata.copy()
+    
+    # Debug: print unique genres before renaming
+    if verbose:
+        print(f"Original genres: {sorted(metadata['genre_code'].unique())}")
+    
     if 'genre_code' in metadata_local.columns:
-        metadata_local['genre_code'] = metadata_local['genre_code'].replace({
+        # Apply replacement
+        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().replace({
             'JAZ': 'JAZZ',
             'MET': 'METAL',
             'ELE': 'ELECTRONIC'
         })
+    
+    # Debug: print unique genres after renaming
+    if verbose:
+        print(f"Renamed genres: {sorted(metadata_local['genre_code'].unique())}")
 
     # token to completely ignore (case-insensitive)
     IGNORE_TOKEN = "endofasubhere"
@@ -277,24 +286,31 @@ def create_genre_context_wordclouds_tfidf(
                 ax.axis('off')
                 continue
 
-            # Build a viridis-based color function mapping values -> colours
+            # Build a custom green-to-purple color function for better visibility
             from matplotlib import cm, colors as mcolors
 
             vals = np.array(list(word_freq.values()), dtype=float)
             vmin, vmax = float(vals.min()), float(vals.max())
+            
+            # Use viridis but shift to start from green (index 0.25) instead of purple (index 0)
+            # This gives us: green -> cyan -> blue -> purple for low to high values
             cmap = cm.get_cmap('viridis')
 
             if np.isclose(vmin, vmax):
                 # constant colour if all values equal
                 def color_func(word, **kwargs):
-                    rgba = cmap(0.5)
+                    rgba = cmap(0.6)  # Mid-range color
                     return mcolors.to_hex(rgba)
             else:
-                norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-
+                # Shift colormap to start from 0.25 (green) to 1.0 (yellow) for better visibility
+                def norm_shifted(val):
+                    """Normalize value and shift to green-yellow range of viridis"""
+                    normalized = (val - vmin) / (vmax - vmin)
+                    return 0.25 + (normalized * 0.75)  # Maps to viridis[0.25:1.0]
+                
                 def color_func(word, **kwargs):
                     val = word_freq.get(word, vmin)
-                    rgba = cmap(norm(val))
+                    rgba = cmap(norm_shifted(val))
                     return mcolors.to_hex(rgba)
 
             # Generate word cloud and recolor by value
@@ -313,18 +329,18 @@ def create_genre_context_wordclouds_tfidf(
             ax.imshow(wordcloud, interpolation='bilinear')
             ax.axis('off')
 
-            # Title
+            # Title - genre is already renamed, no need for .upper()
             if i == 0:
                 ax.set_title(f'{context.upper()}', fontsize=18, fontweight='bold', pad=10)
             if j == 0:
-                ax.text(-0.1, 0.5, f'{genre.upper()}',
+                ax.text(-0.1, 0.5, f'{genre}',  # Already renamed to full name
                        transform=ax.transAxes, fontsize=18, fontweight='bold',
                        rotation=90, va='center', ha='right')
 
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
-    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; Colour = viridis by value)',
+    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; Colour = green-yellow-purple by value)',
                 fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
 
@@ -351,29 +367,38 @@ def create_genre_context_wordclouds_from_text(
     """
     Create word clouds for each genre × context combination from raw text.
 
-    Temporarily renames genres in metadata:
+    Renames genres in metadata:
       JAZ -> JAZZ, MET -> METAL, ELE -> ELECTRONIC
 
-    Words are colored using the viridis colormap according to their weight
-    (TF-IDF or frequency).
+    Words are colored using a custom green-to-purple colormap for better visibility.
     """
     if verbose:
         print("\n" + "="*70)
-        print(f"GENERATING GENRE × CONTEXT WORD CLOUDS ({model_prefix}, VIRIDIS COLOURS)")
+        print(f"GENERATING GENRE × CONTEXT WORD CLOUDS ({model_prefix}, GREEN-PURPLE COLOURS)")
         print("="*70)
         if use_tfidf_weights:
             print("Using TF-IDF weighting within each genre-context combination")
         else:
             print("Using raw word frequency counts")
 
-    # Make a local copy of metadata and rename genre codes temporarily
+    # Make a local copy of metadata and rename genre codes
     metadata_local = metadata.copy()
+    
+    # Debug: print unique genres before renaming
+    if verbose:
+        print(f"Original genres: {sorted(metadata['genre_code'].unique())}")
+    
     if 'genre_code' in metadata_local.columns:
-        metadata_local['genre_code'] = metadata_local['genre_code'].replace({
+        # Apply replacement with strip to handle whitespace
+        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().replace({
             'JAZ': 'JAZZ',
             'MET': 'METAL',
             'ELE': 'ELECTRONIC'
         })
+    
+    # Debug: print unique genres after renaming
+    if verbose:
+        print(f"Renamed genres: {sorted(metadata_local['genre_code'].unique())}")
 
     # Import nltk for tokenization
     import nltk
@@ -453,7 +478,7 @@ def create_genre_context_wordclouds_from_text(
                 ax.axis('off')
                 continue
 
-            # Build viridis-based color function mapping values -> colours
+            # Build custom green-to-purple color function for better visibility
             from matplotlib import cm, colors as mcolors
 
             vals = np.array(list(top_words.values()), dtype=float)
@@ -462,14 +487,18 @@ def create_genre_context_wordclouds_from_text(
 
             if np.isclose(vmin, vmax):
                 def color_func(word, **kwargs):
-                    rgba = cmap(0.5)
+                    rgba = cmap(0.6)
                     return mcolors.to_hex(rgba)
             else:
-                norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-
+                # Shift colormap to start from 0.25 (green) to 1.0 (yellow) for better visibility
+                def norm_shifted(val):
+                    """Normalize value and shift to green-yellow range of viridis"""
+                    normalized = (val - vmin) / (vmax - vmin)
+                    return 0.25 + (normalized * 0.75)  # Maps to viridis[0.25:1.0]
+                
                 def color_func(word, **kwargs):
                     val = top_words.get(word, vmin)
-                    rgba = cmap(norm(val))
+                    rgba = cmap(norm_shifted(val))
                     return mcolors.to_hex(rgba)
 
             # Generate word cloud and recolor by value
@@ -488,11 +517,11 @@ def create_genre_context_wordclouds_from_text(
                 ax.imshow(wordcloud, interpolation='bilinear')
                 ax.axis('off')
 
-                # Title
+                # Title - genre is already renamed, no need for .upper()
                 if i == 0:
                     ax.set_title(f'{context.upper()}', fontsize=18, fontweight='bold', pad=10)
                 if j == 0:
-                    ax.text(-0.1, 0.5, f'{genre.upper()}',
+                    ax.text(-0.1, 0.5, f'{genre}',  # Already renamed to full name
                            transform=ax.transAxes, fontsize=18, fontweight='bold',
                            rotation=90, va='center', ha='right')
 
@@ -506,7 +535,7 @@ def create_genre_context_wordclouds_from_text(
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
     weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
-    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label}; Colour = viridis by value)',
+    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label}; Colour = green-yellow-purple by value)',
                 fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
 
@@ -564,7 +593,7 @@ def create_genre_context_wordclouds(
         raise ValueError(
             "Must provide either 'tfidf_scores_df' (for TF-IDF) or 'text_column' (for Word2Vec/BERT)"
         )
-
+    
 
 # ==============================================================================
 # STATISTICAL COMPARISONS
