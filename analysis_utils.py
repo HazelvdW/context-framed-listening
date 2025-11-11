@@ -298,12 +298,12 @@ def create_genre_context_wordclouds_tfidf(
                 def color_func(word, **kwargs):
                     return '#404040'  # Medium grey
             else:
-                # Map values to grayscale: high values → black (0.0), low values → light grey (0.7)
+                # Map values to grayscale: high values → black (0.0), low values → light grey (0.5)
                 def color_func(word, **kwargs):
                     val = word_freq.get(word, vmin)
                     # Normalize to 0-1, then invert (high val → low grey val → darker)
                     normalized = (val - vmin) / (vmax - vmin)
-                    grey_val = 0.7 - (normalized * 0.7)  # Maps 0→0.7 (light grey), 1→0.0 (black)
+                    grey_val = 0.5 - (normalized * 0.5)  # Maps 0→0.5 (light grey), 1→0.0 (black)
                     grey_hex = mcolors.to_hex([grey_val, grey_val, grey_val])
                     return grey_hex
 
@@ -487,7 +487,7 @@ def create_genre_context_wordclouds_from_text(
                     val = top_words.get(word, vmin)
                     # Normalize to 0-1, then invert (high val → low grey val → darker)
                     normalized = (val - vmin) / (vmax - vmin)
-                    grey_val = 0.7 - (normalized * 0.7)  # Maps 0→0.7 (light grey), 1→0.0 (black)
+                    grey_val = 0.5 - (normalized * 0.5)  # Maps 0→0.5 (light grey), 1→0.0 (black)
                     grey_hex = mcolors.to_hex([grey_val, grey_val, grey_val])
                     return grey_hex
 
