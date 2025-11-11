@@ -203,7 +203,7 @@ def create_genre_context_wordclouds_tfidf(
 
     Adjustments:
     - Larger font for context and genre labels
-    - Map short genre codes to full names for display
+    - Map short genre codes to full names for display (applied only to plot labels)
     - Use a green colormap (light green -> dark green) where darkest = largest score
     """
     if verbose:
@@ -214,7 +214,10 @@ def create_genre_context_wordclouds_tfidf(
     # token to completely ignore (case-insensitive)
     IGNORE_TOKEN = "endofasubhere"
 
-    # Display mapping for genre codes
+    genres = sorted(metadata['genre_code'].unique())
+    contexts = sorted(metadata['context_word'].unique())
+
+    # Display mapping for genre codes (only used for display labels, not modifying data)
     GENRE_DISPLAY_MAP = {
         "JAZ": "JAZZ",
         "MET": "METAL",
@@ -222,13 +225,10 @@ def create_genre_context_wordclouds_tfidf(
         # keep others unchanged
     }
 
-    genres = sorted(metadata['genre_code'].unique())
-    contexts = sorted(metadata['context_word'].unique())
-
     # Prepare a green colormap from light green -> dark green
     from matplotlib.colors import LinearSegmentedColormap
-    light_green = "#73ff7d"   # light green for smallest values
-    dark_green = "#002b00"    # dark green for largest values
+    light_green = "#6fe40f"   # light green for smallest values
+    dark_green = "#1c4b07"    # dark green for largest values
     custom_green_cmap = LinearSegmentedColormap.from_list("custom_green", [light_green, dark_green])
 
     fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
@@ -238,6 +238,9 @@ def create_genre_context_wordclouds_tfidf(
         axes = np.array([[axes]])
     else:
         axes = np.atleast_2d(axes)
+
+    # Precompute display labels for genres (used only for plot y-axes/labels)
+    display_genres = [GENRE_DISPLAY_MAP.get(g, g) for g in genres]
 
     for i, genre in enumerate(genres):
         for j, context in enumerate(contexts):
@@ -299,19 +302,18 @@ def create_genre_context_wordclouds_tfidf(
 
             # Title (context) - larger font
             if i == 0:
-                ax.set_title(f'{context.upper()}', fontsize=14, fontweight='bold', pad=12)
-            # Genre label on the left column (full name mapping) - larger, bold, vertical
+                ax.set_title(f'{context.upper()}', fontsize=20, fontweight='bold', pad=12)
+            # Genre label on the left column (full name mapping) - apply only to plot label (y-axis)
             if j == 0:
-                display_genre = GENRE_DISPLAY_MAP.get(genre, genre)
-                ax.text(-0.12, 0.5, f'{display_genre}', 
-                       transform=ax.transAxes, fontsize=14, fontweight='bold',
-                       rotation=90, va='center', ha='right')
+                display_genre = display_genres[i]
+                # Use set_ylabel so we don't modify the underlying dataset
+                ax.set_ylabel(display_genre, fontsize=20, fontweight='bold', rotation=90, labelpad=18, va='center')
 
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
 
     plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score)',
-                fontsize=18, fontweight='bold', y=0.995)
+                fontsize=24, fontweight='bold', y=0.995)
     plt.tight_layout()
 
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
@@ -339,7 +341,7 @@ def create_genre_context_wordclouds_from_text(
 
     Adjustments:
     - Larger font for context and genre labels
-    - Map short genre codes to full names for display
+    - Map short genre codes to full names for display (applied only to plot labels)
     - Use a green colormap (light green -> dark green) where darkest = largest frequency/score
     """
     if verbose:
@@ -361,7 +363,10 @@ def create_genre_context_wordclouds_from_text(
     # token to completely ignore (case-insensitive)
     IGNORE_TOKEN = "endofasubhere"
 
-    # Display mapping for genre codes
+    genres = sorted(metadata['genre_code'].unique())
+    contexts = sorted(metadata['context_word'].unique())
+
+    # Display mapping for genre codes (only used for display labels, not modifying data)
     GENRE_DISPLAY_MAP = {
         "JAZ": "JAZZ",
         "MET": "METAL",
@@ -369,13 +374,10 @@ def create_genre_context_wordclouds_from_text(
         # keep others unchanged
     }
 
-    genres = sorted(metadata['genre_code'].unique())
-    contexts = sorted(metadata['context_word'].unique())
-
     # Prepare a green colormap from light green -> dark green
     from matplotlib.colors import LinearSegmentedColormap
-    light_green = "#73ff7d"   # light green for smallest values
-    dark_green = "#002b00"    # dark green for largest values
+    light_green = "#6fe40f"   # light green for smallest values
+    dark_green = "#1c4b07"    # dark green for largest values
     custom_green_cmap = LinearSegmentedColormap.from_list("custom_green", [light_green, dark_green])
 
     fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
@@ -385,6 +387,9 @@ def create_genre_context_wordclouds_from_text(
         axes = np.array([[axes]])
     else:
         axes = np.atleast_2d(axes)
+
+    # Precompute display labels for genres (used only for plot y-axes/labels)
+    display_genres = [GENRE_DISPLAY_MAP.get(g, g) for g in genres]
 
     for i, genre in enumerate(genres):
         for j, context in enumerate(contexts):
@@ -472,13 +477,11 @@ def create_genre_context_wordclouds_from_text(
 
                 # Title (context) - larger font
                 if i == 0:
-                    ax.set_title(f'{context.upper()}', fontsize=14, fontweight='bold', pad=12)
-                # Genre label on the left column (full name mapping) - larger, bold, vertical
+                    ax.set_title(f'{context.upper()}', fontsize=20, fontweight='bold', pad=12)
+                # Genre label on the left column (full name mapping) - apply only to plot label (y-axis)
                 if j == 0:
-                    display_genre = GENRE_DISPLAY_MAP.get(genre, genre)
-                    ax.text(-0.12, 0.5, f'{display_genre}',
-                           transform=ax.transAxes, fontsize=14, fontweight='bold',
-                           rotation=90, va='center', ha='right')
+                    display_genre = display_genres[i]
+                    ax.set_ylabel(display_genre, fontsize=20, fontweight='bold', rotation=90, labelpad=18, va='center')
 
             except Exception as e:
                 if verbose:
@@ -491,7 +494,7 @@ def create_genre_context_wordclouds_from_text(
 
     weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
     plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label})',
-                fontsize=18, fontweight='bold', y=0.995)
+                fontsize=24, fontweight='bold', y=0.995)
     plt.tight_layout()
 
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
