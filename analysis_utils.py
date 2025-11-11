@@ -200,64 +200,74 @@ def create_genre_context_wordclouds_tfidf(
 ) -> plt.Figure:
     """
     Create word clouds for each genre × context combination using TF-IDF scores.
-    
-    Parameters
-    ----------
-    tfidf_scores_df : pd.DataFrame
-        TF-IDF scores (rows=docs, cols=terms)
-    metadata : pd.DataFrame
-        Document metadata with genre_code and context_word
-    output_dir : str
-        Directory to save output
-    model_prefix : str
-        Prefix for output filename
-    top_n_words : int
-        Number of top words to include in each word cloud
-    figsize : tuple
-        Figure size
-    verbose : bool
-        Whether to print progress
-        
-    Returns
-    -------
-    plt.Figure
-        The generated figure
+
+    Improvements:
+    - Larger, more readable genre/context labels
+    - Color of each word corresponds to its TF-IDF weight (uses a blue colormap
+      to avoid yellowish colors that are hard to read)
+    - Expand some short genre codes to full names (JAZ->JAZZ, MET->METAL, ELE->ELECTRONIC)
     """
     if verbose:
         print("\n" + "="*70)
         print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF)")
         print("="*70)
-    
+
     # token to completely ignore (case-insensitive)
     IGNORE_TOKEN = "endofasubhere"
-    
+
+    # mapping short codes -> full names (preserve others)
+    GENRE_MAP = {'JAZ': 'JAZZ', 'MET': 'METAL', 'ELE': 'ELECTRONIC'}
+
     genres = sorted(metadata['genre_code'].unique())
     contexts = sorted(metadata['context_word'].unique())
-    
+
     fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
-    
+
     # Normalize axes to a 2D array so indexing with [i, j] always works
-    if len(genres) == 1 and len(contexts) == 1:
+    if np.ndim(axes) == 0:
         axes = np.array([[axes]])
     else:
         axes = np.atleast_2d(axes)
-    
+
+    # helper to create a color function mapping word -> color by frequency
+    def _make_color_func(word_freq: Dict[str, float], cmap_name: str = 'Blues', vmin: Optional[float] = None, vmax: Optional[float] = None):
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+
+        cmap = cm.get_cmap(cmap_name)
+        freqs = np.array(list(word_freq.values()), dtype=float) if len(word_freq) > 0 else np.array([0.0])
+        if vmin is None:
+            vmin = freqs.min() if len(freqs) > 0 else 0.0
+        if vmax is None:
+            vmax = freqs.max() if len(freqs) > 0 else 1.0
+        # avoid zero division
+        span = vmax - vmin if (vmax - vmin) != 0 else 1.0
+
+        def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+            val = float(word_freq.get(word, 0.0))
+            # normalize into [0.2, 1.0] to avoid very pale colors
+            norm = 0.2 + 0.8 * ((val - vmin) / span)
+            norm = np.clip(norm, 0.2, 1.0)
+            rgba = cmap(norm)
+            return mcolors.to_hex(rgba)
+
+        return color_func
+
     for i, genre in enumerate(genres):
         for j, context in enumerate(contexts):
             ax = axes[i, j]
-            
+
             # Get documents for this genre-context combination
             mask = (metadata['genre_code'] == genre) & (metadata['context_word'] == context)
             if mask.sum() == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
+
             # Get mean TF-IDF scores for this combination
-            # Use positional boolean indexing to avoid alignment-by-index issues
             subset_tfidf = tfidf_scores_df.iloc[mask.values]
             mean_tfidf = subset_tfidf.mean(axis=0)
-            
+
             # Remove the unwanted token completely (case-insensitive)
             try:
                 idx_series = mean_tfidf.index.astype(str)
@@ -265,63 +275,69 @@ def create_genre_context_wordclouds_tfidf(
                 if mask_ignore.any():
                     mean_tfidf = mean_tfidf[~mask_ignore]
             except Exception:
-                # Fallback: attempt to drop by label if present
                 mean_tfidf = mean_tfidf.drop(labels=[IGNORE_TOKEN], errors='ignore')
-            
+
             # Get top words (after removing the ignored token)
             top_words = mean_tfidf.nlargest(top_n_words)
-            
+
             if len(top_words) == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
+
             # Ensure ignored token isn't in the final dict (extra safety)
             word_freq = top_words.to_dict()
             word_freq.pop(IGNORE_TOKEN, None)
             # Also pop any case-variants
-            word_freq = {w: v for w, v in word_freq.items() if str(w).lower() != IGNORE_TOKEN.lower()}
-            
+            word_freq = {str(w): v for w, v in word_freq.items() if str(w).lower() != IGNORE_TOKEN.lower()}
+
             if len(word_freq) == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
-            # Generate word cloud
-            wordcloud = WordCloud(
+
+            # Generate word cloud (font size reflects TF-IDF; colors reflect TF-IDF via color_func)
+            wc = WordCloud(
                 width=400, height=300,
                 background_color='white',
-                colormap='viridis',
+                prefer_horizontal=0.9,
                 relative_scaling=0.5,
-                min_font_size=8
-            ).generate_from_frequencies(word_freq)
-            
+                min_font_size=8,
+                max_words=top_n_words
+            )
+            wc.generate_from_frequencies(word_freq)
+
+            color_func = _make_color_func(word_freq, cmap_name='Blues')
+            wc.recolor(color_func=color_func)
+
             # Display
-            ax.imshow(wordcloud, interpolation='bilinear')
+            ax.imshow(wc, interpolation='bilinear')
             ax.axis('off')
-            
-            # Title
+
+            # Title (context on top, bigger)
             if i == 0:
-                ax.set_title(f'{context.upper()}', fontsize=11, fontweight='bold', pad=10)
+                ax.set_title(f'{context.upper()}', fontsize=16, fontweight='bold', pad=12)
+            # Genre label on the left (rotated, bigger)
             if j == 0:
-                ax.text(-0.1, 0.5, f'{genre.upper()}', 
-                       transform=ax.transAxes, fontsize=11, fontweight='bold',
-                       rotation=90, va='center', ha='right')
-            
+                display_genre = GENRE_MAP.get(str(genre), str(genre))
+                ax.text(-0.12, 0.5, f'{display_genre.upper()}',
+                        transform=ax.transAxes, fontsize=16, fontweight='bold',
+                        rotation=90, va='center', ha='right')
+
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
-    
-    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score)',
-                fontsize=16, fontweight='bold', y=0.995)
+
+    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; color ∝ TF-IDF)',
+                fontsize=18, fontweight='bold', y=0.995)
     plt.tight_layout()
-    
+
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
-    
+
     if verbose:
         print(f"\n✓ Saved word clouds to: {output_path}")
-    
+
     return fig
 
 
@@ -338,31 +354,11 @@ def create_genre_context_wordclouds_from_text(
     """
     Create word clouds for each genre × context combination from raw text.
     Works for Word2Vec, BERT, or any model using text data.
-    
-    Parameters
-    ----------
-    metadata : pd.DataFrame
-        Document metadata with genre_code, context_word, and text column
-    text_column : str
-        Name of column containing preprocessed text
-    output_dir : str
-        Directory to save output
-    model_prefix : str
-        Prefix for output filename (e.g., 'W2V', 'BERT')
-    top_n_words : int
-        Number of top words to include in each word cloud
-    figsize : tuple
-        Figure size
-    use_tfidf_weights : bool
-        If True, weight words by TF-IDF within each genre-context combo.
-        If False, use simple word frequency counts.
-    verbose : bool
-        Whether to print progress
-        
-    Returns
-    -------
-    plt.Figure
-        The generated figure
+
+    Improvements:
+    - Larger, more readable genre/context labels
+    - Color of each word corresponds to frequency/TF-IDF weight (uses a blue colormap)
+    - Expand short genre codes to full names
     """
     if verbose:
         print("\n" + "="*70)
@@ -372,141 +368,154 @@ def create_genre_context_wordclouds_from_text(
             print("Using TF-IDF weighting within each genre-context combination")
         else:
             print("Using raw word frequency counts")
-    
+
     # Import nltk for tokenization
     import nltk
     try:
         nltk.data.find('tokenizers/punkt')
     except LookupError:
         nltk.download('punkt')
-    
+
     # token to completely ignore (case-insensitive)
     IGNORE_TOKEN = "endofasubhere"
-    
+    GENRE_MAP = {'JAZ': 'JAZZ', 'MET': 'METAL', 'ELE': 'ELECTRONIC'}
+
     genres = sorted(metadata['genre_code'].unique())
     contexts = sorted(metadata['context_word'].unique())
-    
+
     fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
-    
+
     # Normalize axes to a 2D array
-    if len(genres) == 1 and len(contexts) == 1:
+    if np.ndim(axes) == 0:
         axes = np.array([[axes]])
     else:
         axes = np.atleast_2d(axes)
-    
+
+    # helper color func (same as above)
+    def _make_color_func(word_freq: Dict[str, float], cmap_name: str = 'Blues', vmin: Optional[float] = None, vmax: Optional[float] = None):
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+
+        cmap = cm.get_cmap(cmap_name)
+        freqs = np.array(list(word_freq.values()), dtype=float) if len(word_freq) > 0 else np.array([0.0])
+        if vmin is None:
+            vmin = freqs.min() if len(freqs) > 0 else 0.0
+        if vmax is None:
+            vmax = freqs.max() if len(freqs) > 0 else 1.0
+        span = vmax - vmin if (vmax - vmin) != 0 else 1.0
+
+        def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+            val = float(word_freq.get(word, 0.0))
+            norm = 0.2 + 0.8 * ((val - vmin) / span)
+            norm = np.clip(norm, 0.2, 1.0)
+            rgba = cmap(norm)
+            return mcolors.to_hex(rgba)
+
+        return color_func
+
     for i, genre in enumerate(genres):
         for j, context in enumerate(contexts):
             ax = axes[i, j]
-            
+
             # Get documents for this genre-context combination
             mask = (metadata['genre_code'] == genre) & (metadata['context_word'] == context)
-            
+
             if mask.sum() == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
+
             # Combine all text for this combination
             combined_text = ' '.join(metadata.loc[mask, text_column].astype(str))
-            
+
             if not combined_text.strip():
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
+
             # Generate word frequencies
             if use_tfidf_weights:
-                # Use TF-IDF weighting within this genre-context combo
                 from sklearn.feature_extraction.text import TfidfVectorizer
-                
-                # Get all texts for this combination as a list
+
                 texts = metadata.loc[mask, text_column].astype(str).tolist()
-                
+
                 try:
-                    # Create mini TF-IDF vectorizer for this subset
                     vectorizer = TfidfVectorizer(max_features=500)
                     tfidf_matrix = vectorizer.fit_transform(texts)
-                    
-                    # Get mean TF-IDF scores across documents
                     mean_scores = np.asarray(tfidf_matrix.mean(axis=0)).flatten()
                     terms = vectorizer.get_feature_names_out()
-                    
-                    # Create word frequency dictionary
                     word_freq = dict(zip(terms, mean_scores))
-                    
-                except Exception as e:
+                except Exception:
                     if verbose:
                         print(f"  Warning: TF-IDF failed for {genre}-{context}, using frequency counts")
-                    # Fallback to simple frequency
                     from collections import Counter
                     tokens = nltk.word_tokenize(combined_text.lower())
                     word_counts = Counter(tokens)
                     word_freq = dict(word_counts.most_common(500))
             else:
-                # Use simple word frequency
                 from collections import Counter
                 tokens = nltk.word_tokenize(combined_text.lower())
                 word_counts = Counter(tokens)
                 word_freq = dict(word_counts.most_common(500))
-            
+
             # Remove ignored token (case-insensitive)
-            word_freq = {
-                w: v for w, v in word_freq.items() 
-                if str(w).lower() != IGNORE_TOKEN.lower()
-            }
-            
+            word_freq = {str(w): v for w, v in word_freq.items() if str(w).lower() != IGNORE_TOKEN.lower()}
+
             # Get top N words
             sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
             top_words = dict(sorted_words[:top_n_words])
-            
+
             if len(top_words) == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
-            # Generate word cloud
+
+            # Generate word cloud and recolor based on frequencies (blue cmap)
             try:
-                wordcloud = WordCloud(
+                wc = WordCloud(
                     width=400, height=300,
                     background_color='white',
-                    colormap='viridis',
+                    prefer_horizontal=0.9,
                     relative_scaling=0.5,
-                    min_font_size=8
+                    min_font_size=8,
+                    max_words=top_n_words
                 ).generate_from_frequencies(top_words)
-                
-                # Display
-                ax.imshow(wordcloud, interpolation='bilinear')
+
+                color_func = _make_color_func(top_words, cmap_name='Blues')
+                wc.recolor(color_func=color_func)
+
+                ax.imshow(wc, interpolation='bilinear')
                 ax.axis('off')
-                
-                # Title
+
+                # Title & genre label with larger font
                 if i == 0:
-                    ax.set_title(f'{context.upper()}', fontsize=11, fontweight='bold', pad=10)
+                    ax.set_title(f'{context.upper()}', fontsize=16, fontweight='bold', pad=12)
                 if j == 0:
-                    ax.text(-0.1, 0.5, f'{genre.upper()}', 
-                           transform=ax.transAxes, fontsize=11, fontweight='bold',
-                           rotation=90, va='center', ha='right')
-            
+                    display_genre = GENRE_MAP.get(str(genre), str(genre))
+                    ax.text(-0.12, 0.5, f'{display_genre.upper()}',
+                            transform=ax.transAxes, fontsize=16, fontweight='bold',
+                            rotation=90, va='center', ha='right')
+
             except Exception as e:
                 if verbose:
                     print(f"  Warning: Failed to generate wordcloud for {genre}-{context}: {e}")
                 ax.text(0.5, 0.5, 'Error', ha='center', va='center', fontsize=12)
                 ax.axis('off')
-            
+
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
-    
+
     weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
-    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label})',
-                fontsize=16, fontweight='bold', y=0.995)
+    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label})', fontsize=18, fontweight='bold', y=0.995)
     plt.tight_layout()
-    
+
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
-    
+
     if verbose:
         print(f"\n✓ Saved word clouds to: {output_path}")
-    
+
     return fig
 
 
@@ -524,57 +533,8 @@ def create_genre_context_wordclouds(
     """
     Create word clouds for each genre × context combination.
     Automatically detects whether to use TF-IDF scores or raw text.
-    
-    This is a unified wrapper function that works for all models (TF-IDF, Word2Vec, BERT).
-    
-    Parameters
-    ----------
-    metadata : pd.DataFrame
-        Document metadata with genre_code and context_word
-    output_dir : str
-        Directory to save output
-    model_prefix : str
-        Prefix for output filename (e.g., 'TFIDF', 'W2V', 'BERT')
-    tfidf_scores_df : pd.DataFrame, optional
-        TF-IDF scores (rows=docs, cols=terms). If provided, uses TF-IDF method.
-    text_column : str, optional
-        Name of column containing preprocessed text. Required if tfidf_scores_df not provided.
-    top_n_words : int
-        Number of top words to include in each word cloud
-    figsize : tuple
-        Figure size
-    use_tfidf_weights : bool
-        For text-based method: if True, weight words by TF-IDF within each combo.
-        Only applies when using text_column (not tfidf_scores_df).
-    verbose : bool
-        Whether to print progress
-        
-    Returns
-    -------
-    plt.Figure
-        The generated figure
-        
-    Examples
-    --------
-    # For TF-IDF (using pre-computed scores)
-    fig = create_genre_context_wordclouds(
-        metadata=METdocs,
-        output_dir=OUTPUT_DIR,
-        model_prefix='TFIDF',
-        tfidf_scores_df=df_TFIDF_docs
-    )
-    
-    # For Word2Vec or BERT (using raw text)
-    fig = create_genre_context_wordclouds(
-        metadata=METdocs,
-        output_dir=OUTPUT_DIR,
-        model_prefix='W2V',
-        text_column='METdescr_prepLVL2',
-        use_tfidf_weights=True  # or False for simple frequency
-    )
     """
     if tfidf_scores_df is not None:
-        # Use TF-IDF-specific method
         return create_genre_context_wordclouds_tfidf(
             tfidf_scores_df=tfidf_scores_df,
             metadata=metadata,
@@ -585,7 +545,6 @@ def create_genre_context_wordclouds(
             verbose=verbose
         )
     elif text_column is not None:
-        # Use text-based method (for Word2Vec, BERT, etc.)
         return create_genre_context_wordclouds_from_text(
             metadata=metadata,
             text_column=text_column,
