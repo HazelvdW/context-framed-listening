@@ -2519,6 +2519,8 @@ def create_comprehensive_conditions_figure(
     """
     Comprehensive 4-panel comparison showing all conditions.
     
+    Now handles all conditions including same_clip_same_context.
+    
     Layout (2x2):
     A - Boxplot comparison
     B - Distribution histogram
@@ -2586,40 +2588,92 @@ def create_comprehensive_conditions_figure(
     # PANEL C: All conditions violin plot
     ax_c = fig.add_subplot(gs[1, :])
 
-    order_all = ['same_clip_diff_context', 'diff_clip_same_context',
-                 'diff_clip_diff_context_same_genre', 'diff_clip_diff_context_diff_genre']
-    labels_all = ['Same Clip\nDiff Context\n(Clip-Driven)',
-                  'Diff Clip\nSame Context\n(Context-Driven)',
-                  'Both Different\nSame Genre',
-                  'Both Different\nDiff Genre']
-    palette_all = {
-        'same_clip_diff_context': '#3498db',
-        'diff_clip_same_context': '#e74c3c',
-        'diff_clip_diff_context_same_genre': '#2ecc71',
-        'diff_clip_diff_context_diff_genre': '#95a5a6'
+    # Define all possible conditions with colors and labels
+    all_condition_info = {
+        'same_clip_same_context': {
+            'label': 'Same Clip\nSame Context\n(Baseline)',
+            'color': '#9b59b6',
+            'order': 0
+        },
+        'same_clip_diff_context': {
+            'label': 'Same Clip\nDiff Context\n(Clip-Driven)',
+            'color': '#3498db',
+            'order': 1
+        },
+        'diff_clip_same_context': {
+            'label': 'Diff Clip\nSame Context\n(Context-Driven)',
+            'color': '#e74c3c',
+            'order': 2
+        },
+        'diff_clip_diff_context_same_genre': {
+            'label': 'Both Different\nSame Genre',
+            'color': '#2ecc71',
+            'order': 3
+        },
+        'diff_clip_diff_context_diff_genre': {
+            'label': 'Both Different\nDiff Genre',
+            'color': '#95a5a6',
+            'order': 4
+        }
     }
 
-    sns.violinplot(data=sim_df, x='condition', y='similarity', ax=ax_c,
-                   order=order_all, hue='condition', palette=palette_all,
-                   legend=False, inner='box', linewidth=1.5)
+    # Get only the conditions that exist in the data
+    present_conditions = sim_df['condition'].unique()
+    
+    # Build order, labels, and palette based on what's present
+    order_all = []
+    labels_all = []
+    palette_all = {}
+    
+    for cond in sorted(present_conditions, key=lambda x: all_condition_info.get(x, {'order': 999})['order']):
+        if cond in all_condition_info:
+            order_all.append(cond)
+            labels_all.append(all_condition_info[cond]['label'])
+            palette_all[cond] = all_condition_info[cond]['color']
 
-    ax_c.set_xticklabels(labels_all, rotation=0, ha='center', fontsize=10)
-    ax_c.set_title('C. All Experimental Conditions (Clip vs. Context Highlighted)',
-                   fontsize=12, fontweight='bold')
-    ax_c.set_xlabel('')
-    ax_c.set_ylabel('Cosine Similarity', fontsize=10)
-    ax_c.grid(axis='y', alpha=0.3, linestyle='--')
-    ax_c.set_axisbelow(True)
+    # Only plot if we have data
+    if len(order_all) > 0:
+        sns.violinplot(data=sim_df, x='condition', y='similarity', ax=ax_c,
+                       order=order_all, hue='condition', palette=palette_all,
+                       legend=False, inner='box', linewidth=1.5)
 
-    for i, cond in enumerate(order_all):
-        n = len(sim_df[sim_df['condition'] == cond])
-        ax_c.text(i, 0.03, f'n={n}', ha='center', va='bottom',
-                  transform=ax_c.get_xaxis_transform(), fontsize=9, style='italic')
+        ax_c.set_xticklabels(labels_all, rotation=0, ha='center', fontsize=10)
+        ax_c.set_title('C. All Experimental Conditions (Clip vs. Context Highlighted)',
+                       fontsize=12, fontweight='bold')
+        ax_c.set_xlabel('')
+        ax_c.set_ylabel('Cosine Similarity', fontsize=10)
+        ax_c.grid(axis='y', alpha=0.3, linestyle='--')
+        ax_c.set_axisbelow(True)
 
-    overall_mean = sim_df['similarity'].mean()
-    ax_c.axhline(y=overall_mean, color='darkgreen', linestyle=':',
-                 linewidth=2, alpha=0.5, label=f'Overall Mean: {overall_mean:.4f}')
-    ax_c.legend(loc='upper right', fontsize=9)
+        # Add significance bracket between clip and context if both present
+        if 'same_clip_diff_context' in order_all and 'diff_clip_same_context' in order_all:
+            clip_idx = order_all.index('same_clip_diff_context')
+            context_idx = order_all.index('diff_clip_same_context')
+            
+            y_max_c = sim_df['similarity'].max()
+            bracket_y_c = y_max_c + 0.08
+            ax_c.plot([clip_idx, context_idx], [bracket_y_c, bracket_y_c], 'k-', linewidth=2)
+            ax_c.plot([clip_idx, clip_idx], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
+            ax_c.plot([context_idx, context_idx], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
+            ax_c.text((clip_idx + context_idx) / 2, bracket_y_c + 0.01,
+                      f"Primary Comparison\nd = {primary_comparison['d']:.3f} {primary_comparison['sig']}",
+                      ha='center', va='bottom', fontsize=10, fontweight='bold',
+                      bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7,
+                               edgecolor='black', linewidth=1.5))
+
+        # Add sample sizes
+        for i, cond in enumerate(order_all):
+            n = len(sim_df[sim_df['condition'] == cond])
+            ax_c.text(i, -0.05, f'n={n}', ha='center', va='top',
+                      transform=ax_c.get_xaxis_transform(), fontsize=9, style='italic')
+
+        overall_mean = sim_df['similarity'].mean()
+        ax_c.axhline(y=overall_mean, color='darkgreen', linestyle=':',
+                     linewidth=2, alpha=0.5, label=f'Overall Mean: {overall_mean:.4f}')
+        ax_c.legend(loc='upper right', fontsize=9)
+    else:
+        ax_c.text(0.5, 0.5, 'No condition data available',
+                 ha='center', va='center', fontsize=12, transform=ax_c.transAxes)
 
     plt.suptitle('Comprehensive Condition Comparison Analysis',
                 fontsize=15, fontweight='bold', y=0.995)
@@ -2720,12 +2774,15 @@ def run_tsne_analysis(
     """
     Run t-SNE dimensionality reduction on document embeddings.
     
+    Now handles both document-level and individual thought-level metadata.
+    
     Parameters
     ----------
     embedding_matrix : np.ndarray
         Document embedding matrix (n_docs, n_features) - can be sparse or dense
     metadata : pd.DataFrame
-        Document metadata with columns: ClipContext_pair, clip_name, context_word, genre_code
+        Document metadata. For documents: needs clip_name, context_word, genre_code
+        For individuals: same requirements, ClipContext_pair is optional
     output_dir : str
         Directory to save outputs
     model_prefix : str
@@ -2735,7 +2792,7 @@ def run_tsne_analysis(
     tsne_perplexity : int
         t-SNE perplexity parameter
     tsne_n_iter : int
-        Number of t-SNE iterations
+        Number of t-SNE iterations (renamed to max_iter in sklearn 1.5+)
     tsne_random_state : int
         Random state for reproducibility
     do_word_tsne : bool
@@ -2815,12 +2872,35 @@ def run_tsne_analysis(
         print(f"  Perplexity: {tsne_perplexity}")
         print(f"  Iterations: {tsne_n_iter}")
     
-    tsne = TSNE(n_components=2, perplexity=tsne_perplexity, n_iter=tsne_n_iter,
-                random_state=tsne_random_state, init='pca', learning_rate='auto')
+    # Use max_iter for newer sklearn versions, n_iter for older
+    try:
+        tsne = TSNE(n_components=2, perplexity=tsne_perplexity, max_iter=tsne_n_iter,
+                    random_state=tsne_random_state, init='pca', learning_rate='auto')
+    except TypeError:
+        # Fallback for older sklearn versions
+        tsne = TSNE(n_components=2, perplexity=tsne_perplexity, n_iter=tsne_n_iter,
+                    random_state=tsne_random_state, init='pca', learning_rate='auto')
+    
     X_doc_emb = tsne.fit_transform(X_svd)
     
-    # Create results dataframe
-    meta_subset = metadata[['ClipContext_pair', 'clip_name', 'context_word', 'genre_code']].reset_index(drop=True)
+    # Create results dataframe - FLEXIBLE METADATA HANDLING
+    # Determine which columns are available
+    required_cols = ['clip_name', 'context_word', 'genre_code']
+    optional_cols = ['ClipContext_pair', 'sub_id', 'thought_id']
+    
+    # Build list of columns to extract
+    cols_to_extract = []
+    for col in optional_cols + required_cols:
+        if col in metadata.columns:
+            cols_to_extract.append(col)
+    
+    if verbose:
+        print(f"\nExtracting metadata columns: {cols_to_extract}")
+    
+    # Extract available metadata
+    meta_subset = metadata[cols_to_extract].reset_index(drop=True)
+    
+    # Add t-SNE coordinates
     emb_df = pd.DataFrame(X_doc_emb, columns=['TSNE1', 'TSNE2'])
     doc_tsne_df = pd.concat([meta_subset, emb_df], axis=1)
     
@@ -2902,9 +2982,15 @@ def _run_word_tsne(
     svd_w = TruncatedSVD(n_components=svd_w_components, random_state=random_state)
     W_reduced = svd_w.fit_transform(W)
     
-    # t-SNE
-    tsne_w = TSNE(n_components=2, perplexity=30, n_iter=1000,
-                  random_state=random_state, init='pca', learning_rate='auto')
+    # t-SNE - handle sklearn version compatibility
+    try:
+        tsne_w = TSNE(n_components=2, perplexity=30, max_iter=1000,
+                      random_state=random_state, init='pca', learning_rate='auto')
+    except TypeError:
+        # Fallback for older sklearn versions
+        tsne_w = TSNE(n_components=2, perplexity=30, n_iter=1000,
+                      random_state=random_state, init='pca', learning_rate='auto')
+    
     W_emb = tsne_w.fit_transform(W_reduced)
     
     # Create results dataframe
