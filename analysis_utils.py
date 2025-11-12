@@ -2054,10 +2054,12 @@ def create_comparative_clip_vs_context_effects_figure(
     context_moderator_df: pd.DataFrame,
     genre_moderator_df: pd.DataFrame,
     output_path: str,
-    figsize: Tuple[int, int] = (16, 12)
+    figsize: Tuple[int, int] = (16, 12),
+    verbose: bool = True
 ) -> plt.Figure:
     """
     Side-by-side comparison of clip vs. context effects by factor.
+    Now uses Bonferroni-corrected significance markers if available.
     
     Layout (2x2):
     A - Context: Clip vs. Context means
@@ -2065,8 +2067,23 @@ def create_comparative_clip_vs_context_effects_figure(
     C - Context: Effect sizes
     D - Genre: Effect sizes
     """
+    # Debug output
+    if verbose:
+        print(f"\nDEBUG - create_comparative_clip_vs_context_effects_figure:")
+        print(f"  context_moderator_df shape: {context_moderator_df.shape}")
+        print(f"  genre_moderator_df shape: {genre_moderator_df.shape}")
+        if len(context_moderator_df) > 0:
+            print(f"  context_moderator_df columns: {list(context_moderator_df.columns)}")
+            print(f"  context_moderator_df head:\n{context_moderator_df.head()}")
+        if len(genre_moderator_df) > 0:
+            print(f"  genre_moderator_df columns: {list(genre_moderator_df.columns)}")
+    
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.25)
+
+    # Determine which significance column to use
+    context_sig_col = 'sig_bonferroni' if 'sig_bonferroni' in context_moderator_df.columns else 'sig'
+    genre_sig_col = 'sig_bonferroni' if 'sig_bonferroni' in genre_moderator_df.columns else 'sig'
 
     # PANEL A: Context clip vs. context means
     ax_a = fig.add_subplot(gs[0, 0])
@@ -2092,13 +2109,15 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_a.grid(axis='y', alpha=0.3)
 
         for i, (idx, row) in enumerate(context_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[context_sig_col] != 'n.s.':
                 y_pos = max(row['clip_mean'], row['context_mean']) + 0.01
-                ax_a.text(i, y_pos, row['sig'], ha='center', va='bottom',
+                ax_a.text(i, y_pos, row[context_sig_col], ha='center', va='bottom',
                          fontsize=10, fontweight='bold')
     else:
         ax_a.text(0.5, 0.5, 'No data available',
                  ha='center', va='center', fontsize=12, transform=ax_a.transAxes)
+        if verbose:
+            print("  WARNING: Context moderator dataframe is empty!")
 
     # PANEL B: Genre clip vs. context means
     ax_b = fig.add_subplot(gs[0, 1])
@@ -2124,9 +2143,9 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_b.grid(axis='y', alpha=0.3)
 
         for i, (idx, row) in enumerate(genre_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[genre_sig_col] != 'n.s.':
                 y_pos = max(row['clip_mean'], row['context_mean']) + 0.01
-                ax_b.text(i, y_pos, row['sig'], ha='center', va='bottom',
+                ax_b.text(i, y_pos, row[genre_sig_col], ha='center', va='bottom',
                          fontsize=10, fontweight='bold')
     else:
         ax_b.text(0.5, 0.5, 'No data available',
@@ -2150,9 +2169,9 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_c.grid(axis='x', alpha=0.3)
 
         for i, (idx, row) in enumerate(context_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[context_sig_col] != 'n.s.':
                 x_pos = row['effect_size'] + (0.05 if row['effect_size'] > 0 else -0.05)
-                ax_c.text(x_pos, i, row['sig'], ha='left' if row['effect_size'] > 0 else 'right',
+                ax_c.text(x_pos, i, row[context_sig_col], ha='left' if row['effect_size'] > 0 else 'right',
                          va='center', fontsize=9, fontweight='bold')
     else:
         ax_c.text(0.5, 0.5, 'No data available',
@@ -2176,9 +2195,9 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_d.grid(axis='x', alpha=0.3)
 
         for i, (idx, row) in enumerate(genre_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[genre_sig_col] != 'n.s.':
                 x_pos = row['effect_size'] + (0.05 if row['effect_size'] > 0 else -0.05)
-                ax_d.text(x_pos, i, row['sig'], ha='left' if row['effect_size'] > 0 else 'right',
+                ax_d.text(x_pos, i, row[genre_sig_col], ha='left' if row['effect_size'] > 0 else 'right',
                          va='center', fontsize=9, fontweight='bold')
     else:
         ax_d.text(0.5, 0.5, 'No data available',
