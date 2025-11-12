@@ -2645,26 +2645,10 @@ def create_comprehensive_conditions_figure(
         ax_c.grid(axis='y', alpha=0.3, linestyle='--')
         ax_c.set_axisbelow(True)
 
-        # Add significance bracket between clip and context if both present
-        if 'same_clip_diff_context' in order_all and 'diff_clip_same_context' in order_all:
-            clip_idx = order_all.index('same_clip_diff_context')
-            context_idx = order_all.index('diff_clip_same_context')
-            
-            y_max_c = sim_df['similarity'].max()
-            bracket_y_c = y_max_c + 0.08
-            ax_c.plot([clip_idx, context_idx], [bracket_y_c, bracket_y_c], 'k-', linewidth=2)
-            ax_c.plot([clip_idx, clip_idx], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
-            ax_c.plot([context_idx, context_idx], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
-            ax_c.text((clip_idx + context_idx) / 2, bracket_y_c + 0.01,
-                      f"Primary Comparison\nd = {primary_comparison['d']:.3f} {primary_comparison['sig']}",
-                      ha='center', va='bottom', fontsize=10, fontweight='bold',
-                      bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7,
-                               edgecolor='black', linewidth=1.5))
-
         # Add sample sizes
         for i, cond in enumerate(order_all):
             n = len(sim_df[sim_df['condition'] == cond])
-            ax_c.text(i, -0.05, f'n={n}', ha='center', va='top',
+            ax_c.text(i, 0.03, f'n={n}', ha='center', va='top',
                       transform=ax_c.get_xaxis_transform(), fontsize=9, style='italic')
 
         overall_mean = sim_df['similarity'].mean()
