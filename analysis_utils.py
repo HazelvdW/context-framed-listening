@@ -1250,15 +1250,17 @@ def analyze_factor_clip_vs_context(
     """
     Compare clip-driven vs. context-driven effects within each factor level.
     
-    NOW USES SYMMETRIC AND LOGIC FOR BOTH CONTEXT AND GENRE ANALYSES.
+    CORRECTED LOGIC - ASYMMETRIC:
+    - Context uses OR logic for clip-driven (necessary because contexts differ by definition)
+    - Genre uses AND logic for both (both docs can be same genre across different contexts)
     
     For Context analysis:
-    - Clip-driven: same_clip_diff_context AND both docs from target context
-    - Context-driven: diff_clip_same_context AND both docs from target context
+    - Clip-driven: same_clip_diff_context AND (context_i OR context_j == target)
+    - Context-driven: diff_clip_same_context AND both contexts == target
     
     For Genre analysis:
-    - Clip-driven: same_clip_diff_context AND both docs from target genre
-    - Context-driven: diff_clip_diff_context_same_genre AND both docs from target genre
+    - Clip-driven: same_clip_diff_context AND both genres == target
+    - Context-driven: diff_clip_diff_context_same_genre AND both genres == target
 
     Parameters
     -----------
@@ -1283,27 +1285,36 @@ def analyze_factor_clip_vs_context(
         print("-" * 70)
         print(f"For each {factor_name.lower()}, comparing:")
         if factor_name == 'Context':
-            print("  - Clip-driven: same clip heard in DIFFERENT contexts (both docs from target context)")
-            print("  - Context-driven: DIFFERENT clips heard in the same context (both docs from target context)")
+            print("  - Clip-driven: same clip in DIFFERENT contexts (target context involved - OR logic)")
+            print("  - Context-driven: DIFFERENT clips in the same context (both docs from target context)")
         else:
-            print("  - Clip-driven: same clip heard in DIFFERENT contexts (both docs from target genre)")
-            print("  - Context-driven: DIFFERENT clips from same genre in DIFFERENT contexts (both docs from target genre)")
-        print("\n  NOTE: Now uses symmetric AND logic for both factor types\n")
+            print("  - Clip-driven: same clip in DIFFERENT contexts (both docs from target genre - AND logic)")
+            print("  - Context-driven: DIFFERENT clips from same genre in DIFFERENT contexts (both from target genre)")
+        print("\n  NOTE: Uses ASYMMETRIC logic - OR for context, AND for genre\n")
 
     factor_key = get_factor_key(factor_column)
     moderator_results = []
     factors = metadata[factor_column].unique()
 
     for factor in factors:
-        # CLIP-DRIVEN filter - NOW SYMMETRIC AND LOGIC FOR BOTH
-        clip_filter = (
-            (sim_df['condition'] == 'same_clip_diff_context') &
-            (sim_df[f'{factor_key}_i'] == factor) &
-            (sim_df[f'{factor_key}_j'] == factor)
-        )
+        # CLIP-DRIVEN filter - ASYMMETRIC LOGIC (necessary!)
+        if factor_name == 'Context':
+            # For context: use OR logic because contexts must differ in same_clip_diff_context
+            clip_filter = (
+                (sim_df['condition'] == 'same_clip_diff_context') &
+                ((sim_df[f'{factor_key}_i'] == factor) | (sim_df[f'{factor_key}_j'] == factor))
+            )
+        else:  # Genre
+            # For genre: use AND logic because same clip can have same genre across contexts
+            clip_filter = (
+                (sim_df['condition'] == 'same_clip_diff_context') &
+                (sim_df[f'{factor_key}_i'] == factor) &
+                (sim_df[f'{factor_key}_j'] == factor)
+            )
+        
         clip_sims = sim_df[clip_filter]['similarity']
 
-        # CONTEXT-DRIVEN filter - STANDARDIZED
+        # CONTEXT-DRIVEN filter - ALWAYS AND LOGIC
         if factor_name == 'Context':
             # For context: different clips, same context
             context_filter = (
@@ -1360,6 +1371,8 @@ def analyze_factor_clip_vs_context(
                     print(f"  → In {factor}, clip and context have comparable effects")
 
     if len(moderator_results) == 0:
+        if verbose:
+            print("\nWARNING: No valid comparisons found. Check data filtering.")
         return pd.DataFrame()
 
     moderator_df = pd.DataFrame(moderator_results)
@@ -1467,11 +1480,12 @@ def analyze_factor_consistency(
 
     factor_key = get_factor_key(factor_column)
 
-    # Determine condition filter
+    # STANDARDIZED condition filter
     if factor_name == 'Context':
         condition_filter = sim_df['condition'] == 'diff_clip_same_context'
     else:  # Genre
-        condition_filter = (sim_df['same_genre'] == True) & (sim_df['same_clip'] == False)
+        # FIXED: Use explicit condition to isolate genre effect
+        condition_filter = sim_df['condition'] == 'diff_clip_diff_context_same_genre'
 
     # Calculate CV for each factor
     consistency_results = []
