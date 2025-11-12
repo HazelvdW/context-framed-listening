@@ -2317,86 +2317,122 @@ def create_similarity_matrices_figure(
     sim_df: pd.DataFrame,
     metadata: pd.DataFrame,
     output_path: str,
-    figsize: Tuple[int, int] = (16, 7)
+    figsize: Tuple[int, int] = (16, 7),
+    verbose: bool = False
 ) -> plt.Figure:
     """
     Side-by-side similarity matrices for context and genre.
+    Now handles empty dataframes gracefully.
     
     Layout (1x2):
     A - Context similarity matrix
     B - Genre similarity matrix
     """
+    if verbose:
+        print("\nDEBUG - create_similarity_matrices_figure:")
+        print(f"  context_within_df: {len(context_within_df)} rows")
+        print(f"  genre_within_df: {len(genre_within_df)} rows")
+        print(f"  sim_df: {len(sim_df)} rows")
+        print(f"  Required columns in sim_df: context_i, context_j, genre_i, genre_j")
+        print(f"  Present: {[c for c in ['context_i', 'context_j', 'genre_i', 'genre_j'] if c in sim_df.columns]}")
+    
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
     # PANEL A: Context similarity matrix
-    unique_contexts = metadata['context_word'].unique()
-    context_matrix = np.zeros((len(unique_contexts), len(unique_contexts)))
+    unique_contexts = sorted(metadata['context_word'].unique())
+    
+    if len(context_within_df) > 0 and 'context_i' in sim_df.columns:
+        context_matrix = np.zeros((len(unique_contexts), len(unique_contexts)))
 
-    for i, ctx1 in enumerate(unique_contexts):
-        for j, ctx2 in enumerate(unique_contexts):
-            if i == j:
-                val = context_within_df[context_within_df['context'] == ctx1]['mean'].values
-                context_matrix[i, j] = val[0] if len(val) > 0 else np.nan
-            else:
-                cross_sims = sim_df[
-                    (sim_df['context_i'] == ctx1) &
-                    (sim_df['context_j'] == ctx2)
-                ]['similarity']
-
-                if len(cross_sims) > 0:
-                    context_matrix[i, j] = cross_sims.mean()
+        for i, ctx1 in enumerate(unique_contexts):
+            for j, ctx2 in enumerate(unique_contexts):
+                if i == j:
+                    val = context_within_df[context_within_df['context'] == ctx1]['mean'].values
+                    context_matrix[i, j] = val[0] if len(val) > 0 else np.nan
                 else:
                     cross_sims = sim_df[
-                        (sim_df['context_i'] == ctx2) &
-                        (sim_df['context_j'] == ctx1)
+                        (sim_df['context_i'] == ctx1) &
+                        (sim_df['context_j'] == ctx2)
                     ]['similarity']
-                    context_matrix[i, j] = cross_sims.mean() if len(cross_sims) > 0 else np.nan
 
-    sns.heatmap(context_matrix, annot=True, fmt='.3f', cmap='YlOrRd',
-                xticklabels=unique_contexts, yticklabels=unique_contexts, ax=axes[0],
-                cbar_kws={'label': 'Mean Similarity'},
-                mask=np.isnan(context_matrix),
-                linewidths=0.5, linecolor='gray')
+                    if len(cross_sims) > 0:
+                        context_matrix[i, j] = cross_sims.mean()
+                    else:
+                        cross_sims = sim_df[
+                            (sim_df['context_i'] == ctx2) &
+                            (sim_df['context_j'] == ctx1)
+                        ]['similarity']
+                        context_matrix[i, j] = cross_sims.mean() if len(cross_sims) > 0 else np.nan
 
-    axes[0].set_title('A. Context Similarity Matrix\n(Diagonal = Within-Context)',
-                     fontsize=13, fontweight='bold')
-    axes[0].set_xlabel('Context', fontsize=11)
-    axes[0].set_ylabel('Context', fontsize=11)
+        # Only plot if we have some data
+        if not np.all(np.isnan(context_matrix)):
+            sns.heatmap(context_matrix, annot=True, fmt='.3f', cmap='YlOrRd',
+                        xticklabels=unique_contexts, yticklabels=unique_contexts, ax=axes[0],
+                        cbar_kws={'label': 'Mean Similarity'},
+                        mask=np.isnan(context_matrix),
+                        linewidths=0.5, linecolor='gray')
+            axes[0].set_title('A. Context Similarity Matrix\n(Diagonal = Within-Context)',
+                             fontsize=13, fontweight='bold')
+            axes[0].set_xlabel('Context', fontsize=11)
+            axes[0].set_ylabel('Context', fontsize=11)
+        else:
+            axes[0].text(0.5, 0.5, 'No context similarity data available',
+                        ha='center', va='center', fontsize=12, transform=axes[0].transAxes)
+            axes[0].set_title('A. Context Similarity Matrix', fontsize=13, fontweight='bold')
+    else:
+        axes[0].text(0.5, 0.5, 'No context data available\n(Check within_context_df and context_i/j columns)',
+                    ha='center', va='center', fontsize=12, transform=axes[0].transAxes)
+        axes[0].set_title('A. Context Similarity Matrix', fontsize=13, fontweight='bold')
+        if verbose:
+            print("  WARNING: Context matrix empty - missing data or columns")
 
     # PANEL B: Genre similarity matrix
-    unique_genres = metadata['genre_code'].unique()
-    genre_matrix = np.zeros((len(unique_genres), len(unique_genres)))
+    unique_genres = sorted(metadata['genre_code'].unique())
+    
+    if len(genre_within_df) > 0 and 'genre_i' in sim_df.columns:
+        genre_matrix = np.zeros((len(unique_genres), len(unique_genres)))
 
-    for i, genre1 in enumerate(unique_genres):
-        for j, genre2 in enumerate(unique_genres):
-            if i == j:
-                val = genre_within_df[genre_within_df['genre'] == genre1]['mean'].values
-                genre_matrix[i, j] = val[0] if len(val) > 0 else np.nan
-            else:
-                cross_sims = sim_df[
-                    (sim_df['genre_i'] == genre1) &
-                    (sim_df['genre_j'] == genre2)
-                ]['similarity']
-
-                if len(cross_sims) > 0:
-                    genre_matrix[i, j] = cross_sims.mean()
+        for i, genre1 in enumerate(unique_genres):
+            for j, genre2 in enumerate(unique_genres):
+                if i == j:
+                    val = genre_within_df[genre_within_df['genre'] == genre1]['mean'].values
+                    genre_matrix[i, j] = val[0] if len(val) > 0 else np.nan
                 else:
                     cross_sims = sim_df[
-                        (sim_df['genre_i'] == genre2) &
-                        (sim_df['genre_j'] == genre1)
+                        (sim_df['genre_i'] == genre1) &
+                        (sim_df['genre_j'] == genre2)
                     ]['similarity']
-                    genre_matrix[i, j] = cross_sims.mean() if len(cross_sims) > 0 else np.nan
 
-    sns.heatmap(genre_matrix, annot=True, fmt='.3f', cmap='YlOrRd',
-                xticklabels=unique_genres, yticklabels=unique_genres, ax=axes[1],
-                cbar_kws={'label': 'Mean Similarity'},
-                mask=np.isnan(genre_matrix),
-                linewidths=0.5, linecolor='gray')
+                    if len(cross_sims) > 0:
+                        genre_matrix[i, j] = cross_sims.mean()
+                    else:
+                        cross_sims = sim_df[
+                            (sim_df['genre_i'] == genre2) &
+                            (sim_df['genre_j'] == genre1)
+                        ]['similarity']
+                        genre_matrix[i, j] = cross_sims.mean() if len(cross_sims) > 0 else np.nan
 
-    axes[1].set_title('B. Genre Similarity Matrix\n(Diagonal = Within-Genre)',
-                     fontsize=13, fontweight='bold')
-    axes[1].set_xlabel('Genre', fontsize=11)
-    axes[1].set_ylabel('Genre', fontsize=11)
+        # Only plot if we have some data
+        if not np.all(np.isnan(genre_matrix)):
+            sns.heatmap(genre_matrix, annot=True, fmt='.3f', cmap='YlOrRd',
+                        xticklabels=unique_genres, yticklabels=unique_genres, ax=axes[1],
+                        cbar_kws={'label': 'Mean Similarity'},
+                        mask=np.isnan(genre_matrix),
+                        linewidths=0.5, linecolor='gray')
+            axes[1].set_title('B. Genre Similarity Matrix\n(Diagonal = Within-Genre)',
+                             fontsize=13, fontweight='bold')
+            axes[1].set_xlabel('Genre', fontsize=11)
+            axes[1].set_ylabel('Genre', fontsize=11)
+        else:
+            axes[1].text(0.5, 0.5, 'No genre similarity data available',
+                        ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
+            axes[1].set_title('B. Genre Similarity Matrix', fontsize=13, fontweight='bold')
+    else:
+        axes[1].text(0.5, 0.5, 'No genre data available\n(Check within_genre_df and genre_i/j columns)',
+                    ha='center', va='center', fontsize=12, transform=axes[1].transAxes)
+        axes[1].set_title('B. Genre Similarity Matrix', fontsize=13, fontweight='bold')
+        if verbose:
+            print("  WARNING: Genre matrix empty - missing data or columns")
 
     plt.suptitle('Similarity Matrices: Context vs. Genre',
                 fontsize=16, fontweight='bold')
