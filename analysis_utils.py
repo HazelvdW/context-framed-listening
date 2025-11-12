@@ -2616,15 +2616,11 @@ def create_comprehensive_conditions_figure(
     ax_c.plot([0, 1], [bracket_y_c, bracket_y_c], 'k-', linewidth=2)
     ax_c.plot([0, 0], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
     ax_c.plot([1, 1], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
-    ax_c.text(0.5, bracket_y_c + 0.01,
-              f"Primary Comparison\nd = {primary_comparison['d']:.3f} {primary_comparison['sig']}",
-              ha='center', va='bottom', fontsize=10, fontweight='bold',
-              bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7,
-                       edgecolor='black', linewidth=1.5))
+    ax_c.text(0.5, bracket_y_c + 0.01)
 
     for i, cond in enumerate(order_all):
         n = len(sim_df[sim_df['condition'] == cond])
-        ax_c.text(i, -0.05, f'n={n}', ha='center', va='top',
+        ax_c.text(i, 0.05, f'n={n}', ha='center', va='top',
                   transform=ax_c.get_xaxis_transform(), fontsize=9, style='italic')
 
     overall_mean = sim_df['similarity'].mean()
