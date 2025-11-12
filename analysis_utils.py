@@ -2611,10 +2611,9 @@ def create_comprehensive_conditions_figure(
     ax_c.grid(axis='y', alpha=0.3, linestyle='--')
     ax_c.set_axisbelow(True)
 
-    # Place sample sizes slightly above the x-axis (in axis coordinates ~0.05)
     for i, cond in enumerate(order_all):
         n = len(sim_df[sim_df['condition'] == cond])
-        ax_c.text(i, 0.05, f'n={n}', ha='center', va='bottom',
+        ax_c.text(i, 0.03, f'n={n}', ha='center', va='bottom',
                   transform=ax_c.get_xaxis_transform(), fontsize=9, style='italic')
 
     overall_mean = sim_df['similarity'].mean()
