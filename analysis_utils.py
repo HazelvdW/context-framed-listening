@@ -81,6 +81,42 @@ def compute_cohens_d(group1: pd.Series, group2: pd.Series) -> float:
     return (group1.mean() - group2.mean()) / pooled_std
 
 
+def welch_ttest_with_df(group1: pd.Series, group2: pd.Series) -> Tuple[float, float, float]:
+    """
+    Perform Welch's t-test and calculate proper degrees of freedom.
+    
+    Parameters
+    ----------
+    group1, group2 : pd.Series
+        Two groups to compare
+        
+    Returns
+    -------
+    Tuple[float, float, float]
+        t-statistic, p-value, degrees of freedom
+    """
+    n1, n2 = len(group1), len(group2)
+    m1, m2 = group1.mean(), group2.mean()
+    v1, v2 = group1.var(ddof=1), group2.var(ddof=1)
+    
+    # Standard error of difference
+    se_diff = np.sqrt(v1/n1 + v2/n2)
+    
+    # t-statistic
+    t_stat = (m1 - m2) / se_diff
+    
+    # Welch-Satterthwaite degrees of freedom
+    numerator = (v1/n1 + v2/n2)**2
+    denominator = (v1/n1)**2/(n1-1) + (v2/n2)**2/(n2-1)
+    df = numerator / denominator if denominator > 0 else np.nan
+    
+    # p-value (two-tailed)
+    from scipy.stats import t as t_dist
+    p_value = 2 * (1 - t_dist.cdf(abs(t_stat), df))
+    
+    return t_stat, p_value, df
+
+
 def safe_cv(std: float, mean: float) -> float:
     """Safely compute coefficient of variation with division by zero protection."""
     if mean == 0 or np.isnan(mean):
@@ -597,8 +633,7 @@ def compare_conditions(
     verbose: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
-    Compare two named conditions from sim_df['condition'] with 
-    Welch's t-test (unequal variances) and Cohen's d.
+    Compare two named conditions with Welch's t-test and proper DF calculation.
 
     Parameters
     ----------
@@ -624,7 +659,7 @@ def compare_conditions(
             print(f"WARNING: Insufficient data for {label1} vs {label2}")
         return None
 
-    t_stat, p_value = stats.ttest_ind(data1, data2, equal_var=False)
+    t_stat, p_value, df = welch_ttest_with_df(data1, data2)
     effect_size = compute_cohens_d(data1, data2)
     sig_str = get_significance_marker(p_value)
 
@@ -634,6 +669,7 @@ def compare_conditions(
         "mean2": float(data2.mean()),
         "diff": float(data1.mean() - data2.mean()),
         "t": float(t_stat),
+        "df": float(df),
         "p": float(p_value),
         "sig": sig_str,
         "d": float(effect_size),
@@ -650,6 +686,7 @@ def compare_binary(
 ) -> Dict[str, Any]:
     """
     Compare pairs that share a binary factor vs those that differ.
+    Now includes proper DF calculation for Welch's t-test.
 
     Parameters
     ----------
@@ -665,12 +702,12 @@ def compare_binary(
     Returns
     -------
     dict
-        Summary statistics, t-test results, Cohen's d
+        Summary statistics, t-test results with proper DF, Cohen's d
     """
     same_data = sim_df[sim_df[column] == True]["similarity"]
     diff_data = sim_df[sim_df[column] == False]["similarity"]
 
-    t_stat, p_value = stats.ttest_ind(same_data, diff_data, equal_var=False)
+    t_stat, p_value, df = welch_ttest_with_df(same_data, diff_data)
     effect_size = compute_cohens_d(same_data, diff_data)
     sig_str = get_significance_marker(p_value)
 
@@ -680,6 +717,7 @@ def compare_binary(
         "mean_diff": float(diff_data.mean()),
         "diff": float(same_data.mean() - diff_data.mean()),
         "t": float(t_stat),
+        "df": float(df),
         "p": float(p_value),
         "sig": sig_str,
         "d": float(effect_size),
@@ -691,19 +729,19 @@ def compare_binary(
         print(f"\n{result['comparison']}:")
         print(f"  Same: M={result['mean_same']:.4f} (N={result['n_same']})")
         print(f"  Diff: M={result['mean_diff']:.4f} (N={result['n_diff']})")
-        print(f"  t={result['t']:.3f}, p={result['p']:.4f} {result['sig']}, d={result['d']:.3f}")
+        print(f"  Welch's t({result['df']:.1f}) = {result['t']:.3f}, p={result['p']:.4f} {result['sig']}, d={result['d']:.3f}")
 
     return result
 
 
 def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[str, Any]]:
     """
-    Run all three standard binary comparisons (Clip, Genre, Context).
+    Run all three standard binary comparisons with Bonferroni correction.
     
     Returns
     -------
     list of dict
-        Results for each comparison
+        Results for each comparison with Bonferroni-corrected p-values
     """
     if verbose:
         print("\n" + "="*70)
@@ -713,6 +751,26 @@ def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[
     results = []
     for col, label in [('same_clip', 'Clip'), ('same_genre', 'Genre'), ('same_context', 'Context')]:
         results.append(compare_binary(sim_df, col, label, verbose=verbose))
+    
+    # Apply Bonferroni correction
+    n_comparisons = len(results)
+    bonferroni_alpha = 0.05 / n_comparisons
+    
+    if verbose:
+        print(f"\n{'-'*70}")
+        print(f"BONFERRONI CORRECTION")
+        print(f"Number of comparisons: {n_comparisons}")
+        print(f"Adjusted alpha: {bonferroni_alpha:.4f}")
+        print("-"*70)
+    
+    for result in results:
+        result['p_bonferroni'] = min(result['p'] * n_comparisons, 1.0)
+        result['sig_bonferroni'] = get_significance_marker(result['p_bonferroni'])
+        
+        if verbose:
+            print(f"\n{result['comparison']}:")
+            print(f"  Original: p={result['p']:.4f} {result['sig']}")
+            print(f"  Bonferroni: p={result['p_bonferroni']:.4f} {result['sig_bonferroni']}")
     
     return results
 
@@ -754,14 +812,21 @@ def analyze_within_factor_similarity(
         print("-" * 70)
         if factor_name == 'Context':
             print("When different clip is heard with the same context, how similar are thoughts?")
+            print("(Isolates CONTEXT influence)")
         else:
-            print("When different clips from the same genre are heard, how similar are thoughts?")
+            print("When different clips from the same genre are heard in different contexts, how similar are thoughts?")
+            print("(Isolates GENRE influence by ensuring contexts differ)")
 
-    # Determine condition filter
+    # STANDARDIZED condition filter
     if factor_name == 'Context':
+        # Context: different clips, same context (genre may vary)
         condition_filter = sim_df['condition'] == 'diff_clip_same_context'
+        print("\nUsing condition: diff_clip_same_context")
     else:  # Genre
-        condition_filter = (sim_df['same_genre'] == True) & (sim_df['same_clip'] == False)
+        # Genre: different clips, same genre, BUT DIFFERENT CONTEXTS to isolate genre effect
+        condition_filter = sim_df['condition'] == 'diff_clip_diff_context_same_genre'
+        print("\nUsing condition: diff_clip_diff_context_same_genre")
+        print("(This ensures contexts differ, isolating pure genre effects)")
 
     factor_key = get_factor_key(factor_column)
     within_results = []
@@ -817,7 +882,7 @@ def analyze_pairwise_factor_comparisons(
     verbose: bool = True
 ) -> pd.DataFrame:
     """
-    Perform pairwise comparisons between different factor levels.
+    Perform pairwise comparisons between different factor levels with Bonferroni correction.
 
     Parameters
     -----------
@@ -843,11 +908,13 @@ def analyze_pairwise_factor_comparisons(
         print(f"\n\n2. PAIRWISE {factor_name.upper()} COMPARISONS")
         print("-" * 70)
 
-    # Determine condition filter
+    # Determine condition filter - STANDARDIZED
     if factor_name == 'Context':
+        # Context: different clips, same context
         condition_filter = sim_df['condition'] == 'diff_clip_same_context'
     else:  # Genre
-        condition_filter = (sim_df['same_genre'] == True) & (sim_df['same_clip'] == False)
+        # Genre: different clips, same genre, BUT DIFFERENT CONTEXTS to isolate genre effect
+        condition_filter = sim_df['condition'] == 'diff_clip_diff_context_same_genre'
 
     factor_key = get_factor_key(factor_column)
     factor_pairs = []
@@ -867,8 +934,9 @@ def analyze_pairwise_factor_comparisons(
                 (sim_df[f'{factor_key}_j'] == factor2)
             ]['similarity']
 
-            if len(factor1_sims) > 0 and len(factor2_sims) > 0:
-                t_stat, p_val = stats.ttest_ind(factor1_sims, factor2_sims, equal_var=False)
+            if len(factor1_sims) > 1 and len(factor2_sims) > 1:
+                # Use Welch's t-test with proper DF
+                t_stat, p_val, df = welch_ttest_with_df(factor1_sims, factor2_sims)
                 effect_size = compute_cohens_d(factor1_sims, factor2_sims)
                 sig = get_significance_marker(p_val)
 
@@ -879,25 +947,49 @@ def analyze_pairwise_factor_comparisons(
                     'mean2': factor2_sims.mean(),
                     'difference': factor1_sims.mean() - factor2_sims.mean(),
                     't': t_stat,
+                    'df': df,
                     'p': p_val,
                     'd': effect_size,
-                    'sig': sig
+                    'sig': sig,
+                    'n1': len(factor1_sims),
+                    'n2': len(factor2_sims)
                 })
 
-    pairs_df = pd.DataFrame(factor_pairs).sort_values('d', key=abs, ascending=False)
+    pairs_df = pd.DataFrame(factor_pairs)
+    
+    if len(pairs_df) == 0:
+        if verbose:
+            print("No valid pairwise comparisons found.")
+        return pairs_df
+    
+    # Apply Bonferroni correction
+    n_comparisons = len(pairs_df)
+    bonferroni_alpha = 0.05 / n_comparisons
+    pairs_df['p_bonferroni'] = pairs_df['p'] * n_comparisons
+    pairs_df['p_bonferroni'] = pairs_df['p_bonferroni'].clip(upper=1.0)  # Cap at 1.0
+    pairs_df['sig_bonferroni'] = pairs_df['p_bonferroni'].apply(get_significance_marker)
+    
+    # Sort by absolute effect size
+    pairs_df = pairs_df.sort_values('d', key=abs, ascending=False)
 
     if verbose and len(pairs_df) > 0:
-        sig_pairs = pairs_df[pairs_df['sig'] != 'n.s.']
-        print(f"\nSignificant differences between {factor_name.lower()}s:")
+        print(f"\nApplied Bonferroni correction for {n_comparisons} comparisons")
+        print(f"Adjusted alpha level: {bonferroni_alpha:.4f}\n")
+        
+        sig_pairs = pairs_df[pairs_df['sig_bonferroni'] != 'n.s.']
+        print(f"Significant differences between {factor_name.lower()}s (after correction):")
         
         if len(sig_pairs) > 0:
             for _, row in sig_pairs.iterrows():
                 print(f"\n{row[f'{factor_name.lower()}1'].upper()} vs {row[f'{factor_name.lower()}2'].upper()}:")
                 print(f"  Means: {row['mean1']:.4f} vs {row['mean2']:.4f}")
                 print(f"  Difference: {row['difference']:.4f}")
-                print(f"  t = {row['t']:.3f}, p = {row['p']:.4f} {row['sig']}, d = {row['d']:.3f}")
+                print(f"  Welch's t({row['df']:.1f}) = {row['t']:.3f}")
+                print(f"  p = {row['p']:.4f} → p_bonf = {row['p_bonferroni']:.4f} {row['sig_bonferroni']}")
+                print(f"  Cohen's d = {row['d']:.3f}")
         else:
-            print(f"  No significant differences found")
+            print(f"  No significant differences found after Bonferroni correction")
+            print(f"  (Without correction: {len(pairs_df[pairs_df['sig'] != 'n.s.'])} were significant)")
 
     return pairs_df
 
@@ -1168,9 +1260,16 @@ def analyze_factor_clip_vs_context(
 ) -> pd.DataFrame:
     """
     Compare clip-driven vs. context-driven effects within each factor level.
-
-    For Context: Uses OR logic for clip-driven (captures cross-context comparisons)
-    For Genre: Uses AND logic for both (pure within-genre comparisons)
+    
+    NOW USES SYMMETRIC AND LOGIC FOR BOTH CONTEXT AND GENRE ANALYSES.
+    
+    For Context analysis:
+    - Clip-driven: same_clip_diff_context AND both docs from target context
+    - Context-driven: diff_clip_same_context AND both docs from target context
+    
+    For Genre analysis:
+    - Clip-driven: same_clip_diff_context AND both docs from target genre
+    - Context-driven: diff_clip_diff_context_same_genre AND both docs from target genre
 
     Parameters
     -----------
@@ -1188,51 +1287,54 @@ def analyze_factor_clip_vs_context(
     Returns
     --------
     pd.DataFrame
-        Comparison statistics for each factor level
+        Comparison statistics for each factor level with Bonferroni correction
     """
     if verbose:
         print(f"\n\n3. {factor_name.upper()}-SPECIFIC COMPARISON: Clip vs. Context Effects")
         print("-" * 70)
         print(f"For each {factor_name.lower()}, comparing:")
-        print("  - Clip-driven similarity: same clip heard in DIFFERENT contexts")
-        print("  - Context-driven similarity: DIFFERENT clips heard in the same context")
-
         if factor_name == 'Context':
-            print("\nNote: Clip-driven uses OR logic (at least one doc from target context)")
-            print("      Context-driven uses AND logic (both docs from target context)\n")
+            print("  - Clip-driven: same clip heard in DIFFERENT contexts (both docs from target context)")
+            print("  - Context-driven: DIFFERENT clips heard in the same context (both docs from target context)")
         else:
-            print(f"\nNote: Both use AND logic (both docs from target {factor_name.lower()})\n")
+            print("  - Clip-driven: same clip heard in DIFFERENT contexts (both docs from target genre)")
+            print("  - Context-driven: DIFFERENT clips from same genre in DIFFERENT contexts (both docs from target genre)")
+        print("\n  NOTE: Now uses symmetric AND logic for both factor types\n")
 
     factor_key = get_factor_key(factor_column)
     moderator_results = []
     factors = metadata[factor_column].unique()
 
     for factor in factors:
-        # CLIP-DRIVEN filter
-        if factor_name == 'Context':
-            clip_filter = (
-                (sim_df['condition'] == 'same_clip_diff_context') &
-                ((sim_df[f'{factor_key}_i'] == factor) | (sim_df[f'{factor_key}_j'] == factor))
-            )
-        else:
-            clip_filter = (
-                (sim_df['condition'] == 'same_clip_diff_context') &
-                (sim_df[f'{factor_key}_i'] == factor) &
-                (sim_df[f'{factor_key}_j'] == factor)
-            )
-
-        clip_sims = sim_df[clip_filter]['similarity']
-
-        # CONTEXT-DRIVEN filter (always AND logic)
-        context_filter = (
-            (sim_df['condition'] == 'diff_clip_same_context') &
+        # CLIP-DRIVEN filter - NOW SYMMETRIC AND LOGIC FOR BOTH
+        clip_filter = (
+            (sim_df['condition'] == 'same_clip_diff_context') &
             (sim_df[f'{factor_key}_i'] == factor) &
             (sim_df[f'{factor_key}_j'] == factor)
         )
+        clip_sims = sim_df[clip_filter]['similarity']
+
+        # CONTEXT-DRIVEN filter - STANDARDIZED
+        if factor_name == 'Context':
+            # For context: different clips, same context
+            context_filter = (
+                (sim_df['condition'] == 'diff_clip_same_context') &
+                (sim_df[f'{factor_key}_i'] == factor) &
+                (sim_df[f'{factor_key}_j'] == factor)
+            )
+        else:  # Genre
+            # For genre: different clips, same genre, different contexts (to isolate genre)
+            context_filter = (
+                (sim_df['condition'] == 'diff_clip_diff_context_same_genre') &
+                (sim_df[f'{factor_key}_i'] == factor) &
+                (sim_df[f'{factor_key}_j'] == factor)
+            )
+        
         context_sims = sim_df[context_filter]['similarity']
 
-        if len(clip_sims) > 0 and len(context_sims) > 0:
-            t_stat, p_val = stats.ttest_ind(clip_sims, context_sims, equal_var=False)
+        if len(clip_sims) > 1 and len(context_sims) > 1:
+            # Use Welch's t-test with proper DF
+            t_stat, p_val, df = welch_ttest_with_df(clip_sims, context_sims)
             effect_size = compute_cohens_d(clip_sims, context_sims)
             sig = get_significance_marker(p_val)
 
@@ -1245,6 +1347,7 @@ def analyze_factor_clip_vs_context(
                 'difference': clip_sims.mean() - context_sims.mean(),
                 'effect_size': effect_size,
                 't': t_stat,
+                'df': df,
                 'p': p_val,
                 'sig': sig,
                 'n_clip': len(clip_sims),
@@ -1256,7 +1359,7 @@ def analyze_factor_clip_vs_context(
                 print(f"  Clip-driven: M={clip_sims.mean():.4f}, SD={clip_sims.std():.4f} (N={len(clip_sims)})")
                 print(f"  Context-driven: M={context_sims.mean():.4f}, SD={context_sims.std():.4f} (N={len(context_sims)})")
                 print(f"  Difference: {clip_sims.mean() - context_sims.mean():.4f}")
-                print(f"  t({len(clip_sims) + len(context_sims) - 2}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
+                print(f"  Welch's t({df:.1f}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
                 print(f"  Cohen's d = {effect_size:.3f}")
 
                 if sig != "n.s.":
@@ -1271,8 +1374,21 @@ def analyze_factor_clip_vs_context(
         return pd.DataFrame()
 
     moderator_df = pd.DataFrame(moderator_results)
+    
+    # Apply Bonferroni correction
+    n_comparisons = len(moderator_df)
+    bonferroni_alpha = 0.05 / n_comparisons
+    moderator_df['p_bonferroni'] = moderator_df['p'] * n_comparisons
+    moderator_df['p_bonferroni'] = moderator_df['p_bonferroni'].clip(upper=1.0)
+    moderator_df['sig_bonferroni'] = moderator_df['p_bonferroni'].apply(get_significance_marker)
 
     if verbose:
+        print(f"\n{'-'*70}")
+        print(f"BONFERRONI CORRECTION APPLIED")
+        print(f"Number of comparisons: {n_comparisons}")
+        print(f"Adjusted alpha: {bonferroni_alpha:.4f}")
+        print("-"*70)
+        
         _print_moderator_summary(moderator_df, factor_name, factor_column, sim_df)
 
     return moderator_df
@@ -1284,34 +1400,44 @@ def _print_moderator_summary(
     factor_column: str,
     sim_df: pd.DataFrame
 ) -> None:
-    """Helper function to print moderator analysis summary."""
+    """Helper function to print moderator analysis summary using Bonferroni-corrected results."""
     print(f"\n{'-'*70}")
-    print(f"{factor_name.upper()}-SPECIFIC SUMMARY")
+    print(f"{factor_name.upper()}-SPECIFIC SUMMARY (Bonferroni-corrected)")
     print("-"*70)
 
+    # Use Bonferroni-corrected significance
+    sig_col = 'sig_bonferroni' if 'sig_bonferroni' in moderator_df.columns else 'sig'
+    
     clip_dominant = moderator_df[
-        (moderator_df['difference'] > 0) & (moderator_df['sig'] != 'n.s.')
+        (moderator_df['difference'] > 0) & (moderator_df[sig_col] != 'n.s.')
     ]
     context_dominant = moderator_df[
-        (moderator_df['difference'] < 0) & (moderator_df['sig'] != 'n.s.')
+        (moderator_df['difference'] < 0) & (moderator_df[sig_col] != 'n.s.')
     ]
-    no_difference = moderator_df[moderator_df['sig'] == 'n.s.']
+    no_difference = moderator_df[moderator_df[sig_col] == 'n.s.']
 
     print(f"\nAcross {len(moderator_df)} {factor_name.lower()}s:")
-    print(f"  Clip-dominant: {len(clip_dominant)}")
+    print(f"  Clip-dominant (after correction): {len(clip_dominant)}")
     if len(clip_dominant) > 0:
         print(f"    {', '.join(clip_dominant[factor_name.lower()].values)}")
 
-    print(f"  Context-dominant: {len(context_dominant)}")
+    print(f"  Context-dominant (after correction): {len(context_dominant)}")
     if len(context_dominant) > 0:
         print(f"    {', '.join(context_dominant[factor_name.lower()].values)}")
 
-    print(f"  No significant difference: {len(no_difference)}")
+    print(f"  No significant difference (after correction): {len(no_difference)}")
     if len(no_difference) > 0:
         print(f"    {', '.join(no_difference[factor_name.lower()].values)}")
 
     print(f"\n  Mean effect size (|d|): {moderator_df['effect_size'].abs().mean():.3f}")
     print(f"  Range: {moderator_df['effect_size'].min():.3f} to {moderator_df['effect_size'].max():.3f}")
+    
+    # Show comparison with uncorrected results if available
+    if 'sig' in moderator_df.columns and 'sig_bonferroni' in moderator_df.columns:
+        n_sig_uncorrected = len(moderator_df[moderator_df['sig'] != 'n.s.'])
+        n_sig_corrected = len(moderator_df[moderator_df['sig_bonferroni'] != 'n.s.'])
+        print(f"\n  Significant before correction: {n_sig_uncorrected}")
+        print(f"  Significant after correction: {n_sig_corrected}")
 
 
 def analyze_factor_consistency(
