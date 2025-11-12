@@ -1064,8 +1064,8 @@ def analyze_within_vs_between_factor(
     # Statistical tests
     results = []
     
-    # Overall: Within vs Between
-    t_stat, p_val = ttest_ind(within_all, between_all, equal_var=False)
+    # Overall: Within vs Between with proper DF
+    t_stat, p_val, df = welch_ttest_with_df(pd.Series(within_all), pd.Series(between_all))
     d = compute_cohens_d(pd.Series(within_all), pd.Series(between_all))
     sig = get_significance_marker(p_val)
     
@@ -1081,6 +1081,7 @@ def analyze_within_vs_between_factor(
         'n2': len(between_all),
         'difference': np.mean(within_all) - np.mean(between_all),
         't': t_stat,
+        'df': df,
         'p': p_val,
         'sig': sig,
         'd': d
@@ -1091,7 +1092,7 @@ def analyze_within_vs_between_factor(
         print(f"  Within-{factor_name}: M={np.mean(within_all):.4f}, SD={np.std(within_all):.4f} (N={len(within_all)})")
         print(f"  Between-{factor_name}: M={np.mean(between_all):.4f}, SD={np.std(between_all):.4f} (N={len(between_all)})")
         print(f"  Difference: {np.mean(within_all) - np.mean(between_all):.4f}")
-        print(f"  Welch's t({len(within_all) + len(between_all) - 2}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
+        print(f"  Welch's t({df:.1f}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
         print(f"  Cohen's d = {d:.3f}")
     
     # Individual factors vs Between
@@ -1100,8 +1101,8 @@ def analyze_within_vs_between_factor(
     
     for factor in factors:
         within_factor = within_by_factor[factor]
-        if len(within_factor) > 0:
-            t_stat, p_val = ttest_ind(within_factor, between_all, equal_var=False)
+        if len(within_factor) > 1:
+            t_stat, p_val, df = welch_ttest_with_df(pd.Series(within_factor), pd.Series(between_all))
             d = compute_cohens_d(pd.Series(within_factor), pd.Series(between_all))
             sig = get_significance_marker(p_val)
             
@@ -1117,6 +1118,7 @@ def analyze_within_vs_between_factor(
                 'n2': len(between_all),
                 'difference': np.mean(within_factor) - np.mean(between_all),
                 't': t_stat,
+                'df': df,
                 'p': p_val,
                 'sig': sig,
                 'd': d
@@ -1126,7 +1128,7 @@ def analyze_within_vs_between_factor(
                 print(f"\n{factor.upper()} vs Between:")
                 print(f"  Within-{factor}: M={np.mean(within_factor):.4f}, SD={np.std(within_factor):.4f} (N={len(within_factor)})")
                 print(f"  Between: M={np.mean(between_all):.4f}, SD={np.std(between_all):.4f} (N={len(between_all)})")
-                print(f"  t = {t_stat:.3f}, p = {p_val:.4f} {sig}, d = {d:.3f}")
+                print(f"  Welch's t({df:.1f}) = {t_stat:.3f}, p = {p_val:.4f} {sig}, d = {d:.3f}")
     
     results_df = pd.DataFrame(results)
     
@@ -1219,23 +1221,10 @@ def _plot_within_vs_between(
     ax.grid(axis='y', alpha=0.3)
     ax.set_xticklabels(categories, rotation=45, ha='right', fontsize=10)
     
-    # Add significance annotations
-    # Between vs Within (pooled)
-    overall_result = results_df.iloc[0]
-    y_max = plot_df['similarity'].max()
-    y_pos = y_max + 0.08
-    
-    ax.plot([0, 1], [y_pos, y_pos], 'k-', linewidth=2)
-    ax.plot([0, 0], [y_pos - 0.01, y_pos], 'k-', linewidth=2)
-    ax.plot([1, 1], [y_pos - 0.01, y_pos], 'k-', linewidth=2)
-    ax.text(0.5, y_pos + 0.01, f"d = {overall_result['d']:.3f} {overall_result['sig']}",
-           ha='center', va='bottom', fontsize=10, fontweight='bold',
-           bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
-    
     # Add sample sizes
     for i, cat in enumerate(categories):
         n = len(plot_df[plot_df['category'] == cat])
-        ax.text(i, -0.05, f'n={n}', ha='center', va='top',
+        ax.text(i, 0.05, f'n={n}', ha='center', va='top',
                transform=ax.get_xaxis_transform(), fontsize=9, style='italic')
     
     plt.tight_layout()
