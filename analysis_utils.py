@@ -81,6 +81,42 @@ def compute_cohens_d(group1: pd.Series, group2: pd.Series) -> float:
     return (group1.mean() - group2.mean()) / pooled_std
 
 
+def welch_ttest_with_df(group1: pd.Series, group2: pd.Series) -> Tuple[float, float, float]:
+    """
+    Perform Welch's t-test and calculate proper degrees of freedom.
+    
+    Parameters
+    ----------
+    group1, group2 : pd.Series
+        Two groups to compare
+        
+    Returns
+    -------
+    Tuple[float, float, float]
+        t-statistic, p-value, degrees of freedom
+    """
+    n1, n2 = len(group1), len(group2)
+    m1, m2 = group1.mean(), group2.mean()
+    v1, v2 = group1.var(ddof=1), group2.var(ddof=1)
+    
+    # Standard error of difference
+    se_diff = np.sqrt(v1/n1 + v2/n2)
+    
+    # t-statistic
+    t_stat = (m1 - m2) / se_diff
+    
+    # Welch-Satterthwaite degrees of freedom
+    numerator = (v1/n1 + v2/n2)**2
+    denominator = (v1/n1)**2/(n1-1) + (v2/n2)**2/(n2-1)
+    df = numerator / denominator if denominator > 0 else np.nan
+    
+    # p-value (two-tailed)
+    from scipy.stats import t as t_dist
+    p_value = 2 * (1 - t_dist.cdf(abs(t_stat), df))
+    
+    return t_stat, p_value, df
+
+
 def safe_cv(std: float, mean: float) -> float:
     """Safely compute coefficient of variation with division by zero protection."""
     if mean == 0 or np.isnan(mean):
@@ -200,64 +236,66 @@ def create_genre_context_wordclouds_tfidf(
 ) -> plt.Figure:
     """
     Create word clouds for each genre × context combination using TF-IDF scores.
-    
-    Parameters
-    ----------
-    tfidf_scores_df : pd.DataFrame
-        TF-IDF scores (rows=docs, cols=terms)
-    metadata : pd.DataFrame
-        Document metadata with genre_code and context_word
-    output_dir : str
-        Directory to save output
-    model_prefix : str
-        Prefix for output filename
-    top_n_words : int
-        Number of top words to include in each word cloud
-    figsize : tuple
-        Figure size
-    verbose : bool
-        Whether to print progress
-        
-    Returns
-    -------
-    plt.Figure
-        The generated figure
+
+    This version renames genres in metadata:
+      JAZ -> JAZZ, MET -> METAL, ELE -> ELECTRONIC
+
+    Words are colored using a custom green-to-purple colormap for better visibility.
     """
     if verbose:
         print("\n" + "="*70)
-        print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF)")
+        print("GENERATING GENRE × CONTEXT WORD CLOUDS (TF-IDF, GRAYSCALE)")
         print("="*70)
+
+    # Make a local copy of metadata and rename genre codes
+    metadata_local = metadata.copy()
     
+    # Debug: print unique genres before renaming
+    if verbose:
+        print(f"Original genres: {sorted(metadata['genre_code'].unique())}")
+    
+    if 'genre_code' in metadata_local.columns:
+        # Apply replacement - handle both upper and lower case
+        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().str.upper().replace({
+            'JAZ': 'JAZZ',
+            'MET': 'METAL',
+            'ELE': 'ELECTRONIC',
+            '80S': '80S'  # Keep as is
+        })
+    
+    # Debug: print unique genres after renaming
+    if verbose:
+        print(f"Renamed genres: {sorted(metadata_local['genre_code'].unique())}")
+
     # token to completely ignore (case-insensitive)
     IGNORE_TOKEN = "endofasubhere"
-    
-    genres = sorted(metadata['genre_code'].unique())
-    contexts = sorted(metadata['context_word'].unique())
-    
+
+    genres = sorted(metadata_local['genre_code'].unique())
+    contexts = sorted(metadata_local['context_word'].unique())
+
     fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
-    
+
     # Normalize axes to a 2D array so indexing with [i, j] always works
     if len(genres) == 1 and len(contexts) == 1:
         axes = np.array([[axes]])
     else:
         axes = np.atleast_2d(axes)
-    
+
     for i, genre in enumerate(genres):
         for j, context in enumerate(contexts):
             ax = axes[i, j]
-            
-            # Get documents for this genre-context combination
-            mask = (metadata['genre_code'] == genre) & (metadata['context_word'] == context)
+
+            # Get documents for this genre-context combination (use local metadata)
+            mask = (metadata_local['genre_code'] == genre) & (metadata_local['context_word'] == context)
             if mask.sum() == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
-            # Get mean TF-IDF scores for this combination
+
             # Use positional boolean indexing to avoid alignment-by-index issues
             subset_tfidf = tfidf_scores_df.iloc[mask.values]
             mean_tfidf = subset_tfidf.mean(axis=0)
-            
+
             # Remove the unwanted token completely (case-insensitive)
             try:
                 idx_series = mean_tfidf.index.astype(str)
@@ -265,63 +303,83 @@ def create_genre_context_wordclouds_tfidf(
                 if mask_ignore.any():
                     mean_tfidf = mean_tfidf[~mask_ignore]
             except Exception:
-                # Fallback: attempt to drop by label if present
                 mean_tfidf = mean_tfidf.drop(labels=[IGNORE_TOKEN], errors='ignore')
-            
+
             # Get top words (after removing the ignored token)
             top_words = mean_tfidf.nlargest(top_n_words)
-            
+
             if len(top_words) == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
+
             # Ensure ignored token isn't in the final dict (extra safety)
             word_freq = top_words.to_dict()
             word_freq.pop(IGNORE_TOKEN, None)
-            # Also pop any case-variants
             word_freq = {w: v for w, v in word_freq.items() if str(w).lower() != IGNORE_TOKEN.lower()}
-            
+
             if len(word_freq) == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
-            # Generate word cloud
+
+            # Build a grayscale color function: black for high values, light grey for low values
+            from matplotlib import colors as mcolors
+
+            vals = np.array(list(word_freq.values()), dtype=float)
+            vmin, vmax = float(vals.min()), float(vals.max())
+
+            if np.isclose(vmin, vmax):
+                # constant colour if all values equal
+                def color_func(word, **kwargs):
+                    return '#404040'  # Medium grey
+            else:
+                # Map values to grayscale: high values → black (0.0), low values → light grey (0.5)
+                def color_func(word, **kwargs):
+                    val = word_freq.get(word, vmin)
+                    # Normalize to 0-1, then invert (high val → low grey val → darker)
+                    normalized = (val - vmin) / (vmax - vmin)
+                    grey_val = 0.5 - (normalized * 0.5)  # Maps 0→0.5 (light grey), 1→0.0 (black)
+                    grey_hex = mcolors.to_hex([grey_val, grey_val, grey_val])
+                    return grey_hex
+
+            # Generate word cloud and recolor by value
             wordcloud = WordCloud(
                 width=400, height=300,
                 background_color='white',
-                colormap='viridis',
                 relative_scaling=0.5,
                 min_font_size=8
             ).generate_from_frequencies(word_freq)
-            
+
+            # Apply per-word coloring according to TF-IDF value
+            wordcloud.recolor(color_func=color_func)
+
             # Display
             ax.imshow(wordcloud, interpolation='bilinear')
             ax.axis('off')
-            
-            # Title
+
+            # Title - genre is already renamed, no need for .upper()
             if i == 0:
-                ax.set_title(f'{context.upper()}', fontsize=11, fontweight='bold', pad=10)
+                ax.set_title(f'{context.upper()}', fontsize=18, fontweight='bold', pad=10)
             if j == 0:
-                ax.text(-0.1, 0.5, f'{genre.upper()}', 
-                       transform=ax.transAxes, fontsize=11, fontweight='bold',
+                ax.text(-0.1, 0.5, f'{genre}',  # Already renamed to full name
+                       transform=ax.transAxes, fontsize=18, fontweight='bold',
                        rotation=90, va='center', ha='right')
-            
+
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
-    
-    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score)',
-                fontsize=16, fontweight='bold', y=0.995)
+
+    plt.suptitle('Word Clouds by Genre × Context\n(Word size = TF-IDF score; Darker = higher value)',
+                fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
-    
+
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
-    
+
     if verbose:
         print(f"\n✓ Saved word clouds to: {output_path}")
-    
+
     return fig
 
 
@@ -337,176 +395,182 @@ def create_genre_context_wordclouds_from_text(
 ) -> plt.Figure:
     """
     Create word clouds for each genre × context combination from raw text.
-    Works for Word2Vec, BERT, or any model using text data.
-    
-    Parameters
-    ----------
-    metadata : pd.DataFrame
-        Document metadata with genre_code, context_word, and text column
-    text_column : str
-        Name of column containing preprocessed text
-    output_dir : str
-        Directory to save output
-    model_prefix : str
-        Prefix for output filename (e.g., 'W2V', 'BERT')
-    top_n_words : int
-        Number of top words to include in each word cloud
-    figsize : tuple
-        Figure size
-    use_tfidf_weights : bool
-        If True, weight words by TF-IDF within each genre-context combo.
-        If False, use simple word frequency counts.
-    verbose : bool
-        Whether to print progress
-        
-    Returns
-    -------
-    plt.Figure
-        The generated figure
+
+    Renames genres in metadata:
+      JAZ -> JAZZ, MET -> METAL, ELE -> ELECTRONIC
+
+    Words are colored using a custom green-to-purple colormap for better visibility.
     """
     if verbose:
         print("\n" + "="*70)
-        print(f"GENERATING GENRE × CONTEXT WORD CLOUDS ({model_prefix})")
+        print(f"GENERATING GENRE × CONTEXT WORD CLOUDS ({model_prefix}, GRAYSCALE)")
         print("="*70)
         if use_tfidf_weights:
             print("Using TF-IDF weighting within each genre-context combination")
         else:
             print("Using raw word frequency counts")
+
+    # Make a local copy of metadata and rename genre codes
+    metadata_local = metadata.copy()
     
+    # Debug: print unique genres before renaming
+    if verbose:
+        print(f"Original genres: {sorted(metadata['genre_code'].unique())}")
+    
+    if 'genre_code' in metadata_local.columns:
+        # Apply replacement with strip to handle whitespace - handle both upper and lower case
+        metadata_local['genre_code'] = metadata_local['genre_code'].str.strip().str.upper().replace({
+            'JAZ': 'JAZZ',
+            'MET': 'METAL',
+            'ELE': 'ELECTRONIC',
+            '80S': '80s'  # Keep 80s as is
+        })
+    
+    # Debug: print unique genres after renaming
+    if verbose:
+        print(f"Renamed genres: {sorted(metadata_local['genre_code'].unique())}")
+
     # Import nltk for tokenization
     import nltk
     try:
         nltk.data.find('tokenizers/punkt')
     except LookupError:
         nltk.download('punkt')
-    
+
     # token to completely ignore (case-insensitive)
     IGNORE_TOKEN = "endofasubhere"
-    
-    genres = sorted(metadata['genre_code'].unique())
-    contexts = sorted(metadata['context_word'].unique())
-    
+
+    genres = sorted(metadata_local['genre_code'].unique())
+    contexts = sorted(metadata_local['context_word'].unique())
+
     fig, axes = plt.subplots(len(genres), len(contexts), figsize=figsize)
-    
+
     # Normalize axes to a 2D array
     if len(genres) == 1 and len(contexts) == 1:
         axes = np.array([[axes]])
     else:
         axes = np.atleast_2d(axes)
-    
+
     for i, genre in enumerate(genres):
         for j, context in enumerate(contexts):
             ax = axes[i, j]
-            
+
             # Get documents for this genre-context combination
-            mask = (metadata['genre_code'] == genre) & (metadata['context_word'] == context)
-            
+            mask = (metadata_local['genre_code'] == genre) & (metadata_local['context_word'] == context)
+
             if mask.sum() == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
+
             # Combine all text for this combination
-            combined_text = ' '.join(metadata.loc[mask, text_column].astype(str))
-            
+            combined_text = ' '.join(metadata_local.loc[mask, text_column].astype(str))
+
             if not combined_text.strip():
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
-            # Generate word frequencies
+
+            # Generate word frequencies or TF-IDF weights
             if use_tfidf_weights:
-                # Use TF-IDF weighting within this genre-context combo
                 from sklearn.feature_extraction.text import TfidfVectorizer
-                
-                # Get all texts for this combination as a list
-                texts = metadata.loc[mask, text_column].astype(str).tolist()
-                
+
+                texts = metadata_local.loc[mask, text_column].astype(str).tolist()
+
                 try:
-                    # Create mini TF-IDF vectorizer for this subset
                     vectorizer = TfidfVectorizer(max_features=500)
                     tfidf_matrix = vectorizer.fit_transform(texts)
-                    
-                    # Get mean TF-IDF scores across documents
                     mean_scores = np.asarray(tfidf_matrix.mean(axis=0)).flatten()
                     terms = vectorizer.get_feature_names_out()
-                    
-                    # Create word frequency dictionary
                     word_freq = dict(zip(terms, mean_scores))
-                    
-                except Exception as e:
+                except Exception:
                     if verbose:
                         print(f"  Warning: TF-IDF failed for {genre}-{context}, using frequency counts")
-                    # Fallback to simple frequency
                     from collections import Counter
                     tokens = nltk.word_tokenize(combined_text.lower())
                     word_counts = Counter(tokens)
                     word_freq = dict(word_counts.most_common(500))
             else:
-                # Use simple word frequency
                 from collections import Counter
                 tokens = nltk.word_tokenize(combined_text.lower())
                 word_counts = Counter(tokens)
                 word_freq = dict(word_counts.most_common(500))
-            
+
             # Remove ignored token (case-insensitive)
-            word_freq = {
-                w: v for w, v in word_freq.items() 
-                if str(w).lower() != IGNORE_TOKEN.lower()
-            }
-            
+            word_freq = {w: v for w, v in word_freq.items() if str(w).lower() != IGNORE_TOKEN.lower()}
+
             # Get top N words
             sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
             top_words = dict(sorted_words[:top_n_words])
-            
+
             if len(top_words) == 0:
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=12)
                 ax.axis('off')
                 continue
-            
-            # Generate word cloud
+
+            # Build grayscale color function: black for high values, light grey for low values
+            from matplotlib import colors as mcolors
+
+            vals = np.array(list(top_words.values()), dtype=float)
+            vmin, vmax = float(vals.min()), float(vals.max())
+
+            if np.isclose(vmin, vmax):
+                def color_func(word, **kwargs):
+                    return '#404040'  # Medium grey
+            else:
+                # Map values to grayscale: high values → black (0.0), low values → light grey (0.7)
+                def color_func(word, **kwargs):
+                    val = top_words.get(word, vmin)
+                    # Normalize to 0-1, then invert (high val → low grey val → darker)
+                    normalized = (val - vmin) / (vmax - vmin)
+                    grey_val = 0.5 - (normalized * 0.5)  # Maps 0→0.5 (light grey), 1→0.0 (black)
+                    grey_hex = mcolors.to_hex([grey_val, grey_val, grey_val])
+                    return grey_hex
+
+            # Generate word cloud and recolor by value
             try:
                 wordcloud = WordCloud(
                     width=400, height=300,
                     background_color='white',
-                    colormap='viridis',
                     relative_scaling=0.5,
                     min_font_size=8
                 ).generate_from_frequencies(top_words)
-                
+
+                wordcloud.recolor(color_func=color_func)
+
                 # Display
                 ax.imshow(wordcloud, interpolation='bilinear')
                 ax.axis('off')
-                
-                # Title
+
+                # Title - genre is already renamed, no need for .upper()
                 if i == 0:
-                    ax.set_title(f'{context.upper()}', fontsize=11, fontweight='bold', pad=10)
+                    ax.set_title(f'{context.upper()}', fontsize=18, fontweight='bold', pad=10)
                 if j == 0:
-                    ax.text(-0.1, 0.5, f'{genre.upper()}', 
-                           transform=ax.transAxes, fontsize=11, fontweight='bold',
+                    ax.text(-0.1, 0.5, f'{genre}',  # Already renamed to full name
+                           transform=ax.transAxes, fontsize=18, fontweight='bold',
                            rotation=90, va='center', ha='right')
-            
+
             except Exception as e:
                 if verbose:
                     print(f"  Warning: Failed to generate wordcloud for {genre}-{context}: {e}")
                 ax.text(0.5, 0.5, 'Error', ha='center', va='center', fontsize=12)
                 ax.axis('off')
-            
+
             if verbose and (i * len(contexts) + j + 1) % 4 == 0:
                 print(f"  Generated {i * len(contexts) + j + 1}/{len(genres) * len(contexts)} word clouds...")
-    
+
     weight_label = "TF-IDF weighted" if use_tfidf_weights else "Word frequency"
-    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label})',
-                fontsize=16, fontweight='bold', y=0.995)
+    plt.suptitle(f'Word Clouds by Genre × Context\n({weight_label}; Darker = higher value)',
+                fontsize=22, fontweight='bold', y=0.995)
     plt.tight_layout()
-    
+
     output_path = os.path.join(output_dir, f'{model_prefix}_genre_context_wordclouds.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
-    
+
     if verbose:
         print(f"\n✓ Saved word clouds to: {output_path}")
-    
+
     return fig
 
 
@@ -524,54 +588,8 @@ def create_genre_context_wordclouds(
     """
     Create word clouds for each genre × context combination.
     Automatically detects whether to use TF-IDF scores or raw text.
-    
+
     This is a unified wrapper function that works for all models (TF-IDF, Word2Vec, BERT).
-    
-    Parameters
-    ----------
-    metadata : pd.DataFrame
-        Document metadata with genre_code and context_word
-    output_dir : str
-        Directory to save output
-    model_prefix : str
-        Prefix for output filename (e.g., 'TFIDF', 'W2V', 'BERT')
-    tfidf_scores_df : pd.DataFrame, optional
-        TF-IDF scores (rows=docs, cols=terms). If provided, uses TF-IDF method.
-    text_column : str, optional
-        Name of column containing preprocessed text. Required if tfidf_scores_df not provided.
-    top_n_words : int
-        Number of top words to include in each word cloud
-    figsize : tuple
-        Figure size
-    use_tfidf_weights : bool
-        For text-based method: if True, weight words by TF-IDF within each combo.
-        Only applies when using text_column (not tfidf_scores_df).
-    verbose : bool
-        Whether to print progress
-        
-    Returns
-    -------
-    plt.Figure
-        The generated figure
-        
-    Examples
-    --------
-    # For TF-IDF (using pre-computed scores)
-    fig = create_genre_context_wordclouds(
-        metadata=METdocs,
-        output_dir=OUTPUT_DIR,
-        model_prefix='TFIDF',
-        tfidf_scores_df=df_TFIDF_docs
-    )
-    
-    # For Word2Vec or BERT (using raw text)
-    fig = create_genre_context_wordclouds(
-        metadata=METdocs,
-        output_dir=OUTPUT_DIR,
-        model_prefix='W2V',
-        text_column='METdescr_prepLVL2',
-        use_tfidf_weights=True  # or False for simple frequency
-    )
     """
     if tfidf_scores_df is not None:
         # Use TF-IDF-specific method
@@ -600,7 +618,7 @@ def create_genre_context_wordclouds(
         raise ValueError(
             "Must provide either 'tfidf_scores_df' (for TF-IDF) or 'text_column' (for Word2Vec/BERT)"
         )
-
+    
 
 # ==============================================================================
 # STATISTICAL COMPARISONS
@@ -615,8 +633,7 @@ def compare_conditions(
     verbose: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
-    Compare two named conditions from sim_df['condition'] with 
-    Welch's t-test (unequal variances) and Cohen's d.
+    Compare two named conditions with Welch's t-test and proper DF calculation.
 
     Parameters
     ----------
@@ -642,7 +659,7 @@ def compare_conditions(
             print(f"WARNING: Insufficient data for {label1} vs {label2}")
         return None
 
-    t_stat, p_value = stats.ttest_ind(data1, data2, equal_var=False)
+    t_stat, p_value, df = welch_ttest_with_df(data1, data2)
     effect_size = compute_cohens_d(data1, data2)
     sig_str = get_significance_marker(p_value)
 
@@ -652,6 +669,7 @@ def compare_conditions(
         "mean2": float(data2.mean()),
         "diff": float(data1.mean() - data2.mean()),
         "t": float(t_stat),
+        "df": float(df),
         "p": float(p_value),
         "sig": sig_str,
         "d": float(effect_size),
@@ -668,6 +686,7 @@ def compare_binary(
 ) -> Dict[str, Any]:
     """
     Compare pairs that share a binary factor vs those that differ.
+    Now includes proper DF calculation for Welch's t-test.
 
     Parameters
     ----------
@@ -683,12 +702,12 @@ def compare_binary(
     Returns
     -------
     dict
-        Summary statistics, t-test results, Cohen's d
+        Summary statistics, t-test results with proper DF, Cohen's d
     """
     same_data = sim_df[sim_df[column] == True]["similarity"]
     diff_data = sim_df[sim_df[column] == False]["similarity"]
 
-    t_stat, p_value = stats.ttest_ind(same_data, diff_data, equal_var=False)
+    t_stat, p_value, df = welch_ttest_with_df(same_data, diff_data)
     effect_size = compute_cohens_d(same_data, diff_data)
     sig_str = get_significance_marker(p_value)
 
@@ -698,6 +717,7 @@ def compare_binary(
         "mean_diff": float(diff_data.mean()),
         "diff": float(same_data.mean() - diff_data.mean()),
         "t": float(t_stat),
+        "df": float(df),
         "p": float(p_value),
         "sig": sig_str,
         "d": float(effect_size),
@@ -709,19 +729,19 @@ def compare_binary(
         print(f"\n{result['comparison']}:")
         print(f"  Same: M={result['mean_same']:.4f} (N={result['n_same']})")
         print(f"  Diff: M={result['mean_diff']:.4f} (N={result['n_diff']})")
-        print(f"  t={result['t']:.3f}, p={result['p']:.4f} {result['sig']}, d={result['d']:.3f}")
+        print(f"  Welch's t({result['df']:.1f}) = {result['t']:.3f}, p={result['p']:.4f} {result['sig']}, d={result['d']:.3f}")
 
     return result
 
 
 def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[str, Any]]:
     """
-    Run all three standard binary comparisons (Clip, Genre, Context).
+    Run all three standard binary comparisons with Bonferroni correction.
     
     Returns
     -------
     list of dict
-        Results for each comparison
+        Results for each comparison with Bonferroni-corrected p-values
     """
     if verbose:
         print("\n" + "="*70)
@@ -731,6 +751,26 @@ def binary_comparisons(sim_df: pd.DataFrame, verbose: bool = True) -> List[Dict[
     results = []
     for col, label in [('same_clip', 'Clip'), ('same_genre', 'Genre'), ('same_context', 'Context')]:
         results.append(compare_binary(sim_df, col, label, verbose=verbose))
+    
+    # Apply Bonferroni correction
+    n_comparisons = len(results)
+    bonferroni_alpha = 0.05 / n_comparisons
+    
+    if verbose:
+        print(f"\n{'-'*70}")
+        print(f"BONFERRONI CORRECTION")
+        print(f"Number of comparisons: {n_comparisons}")
+        print(f"Adjusted alpha: {bonferroni_alpha:.4f}")
+        print("-"*70)
+    
+    for result in results:
+        result['p_bonferroni'] = min(result['p'] * n_comparisons, 1.0)
+        result['sig_bonferroni'] = get_significance_marker(result['p_bonferroni'])
+        
+        if verbose:
+            print(f"\n{result['comparison']}:")
+            print(f"  Original: p={result['p']:.4f} {result['sig']}")
+            print(f"  Bonferroni: p={result['p_bonferroni']:.4f} {result['sig_bonferroni']}")
     
     return results
 
@@ -772,14 +812,21 @@ def analyze_within_factor_similarity(
         print("-" * 70)
         if factor_name == 'Context':
             print("When different clip is heard with the same context, how similar are thoughts?")
+            print("(Isolates CONTEXT influence)")
         else:
-            print("When different clips from the same genre are heard, how similar are thoughts?")
+            print("When different clips from the same genre are heard in different contexts, how similar are thoughts?")
+            print("(Isolates GENRE influence by ensuring contexts differ)")
 
-    # Determine condition filter
+    # STANDARDIZED condition filter
     if factor_name == 'Context':
+        # Context: different clips, same context (genre may vary)
         condition_filter = sim_df['condition'] == 'diff_clip_same_context'
+        print("\nUsing condition: diff_clip_same_context")
     else:  # Genre
-        condition_filter = (sim_df['same_genre'] == True) & (sim_df['same_clip'] == False)
+        # Genre: different clips, same genre, BUT DIFFERENT CONTEXTS to isolate genre effect
+        condition_filter = sim_df['condition'] == 'diff_clip_diff_context_same_genre'
+        print("\nUsing condition: diff_clip_diff_context_same_genre")
+        print("(This ensures contexts differ, isolating pure genre effects)")
 
     factor_key = get_factor_key(factor_column)
     within_results = []
@@ -835,7 +882,7 @@ def analyze_pairwise_factor_comparisons(
     verbose: bool = True
 ) -> pd.DataFrame:
     """
-    Perform pairwise comparisons between different factor levels.
+    Perform pairwise comparisons between different factor levels with Bonferroni correction.
 
     Parameters
     -----------
@@ -861,11 +908,13 @@ def analyze_pairwise_factor_comparisons(
         print(f"\n\n2. PAIRWISE {factor_name.upper()} COMPARISONS")
         print("-" * 70)
 
-    # Determine condition filter
+    # Determine condition filter - STANDARDIZED
     if factor_name == 'Context':
+        # Context: different clips, same context
         condition_filter = sim_df['condition'] == 'diff_clip_same_context'
     else:  # Genre
-        condition_filter = (sim_df['same_genre'] == True) & (sim_df['same_clip'] == False)
+        # Genre: different clips, same genre, BUT DIFFERENT CONTEXTS to isolate genre effect
+        condition_filter = sim_df['condition'] == 'diff_clip_diff_context_same_genre'
 
     factor_key = get_factor_key(factor_column)
     factor_pairs = []
@@ -885,8 +934,9 @@ def analyze_pairwise_factor_comparisons(
                 (sim_df[f'{factor_key}_j'] == factor2)
             ]['similarity']
 
-            if len(factor1_sims) > 0 and len(factor2_sims) > 0:
-                t_stat, p_val = stats.ttest_ind(factor1_sims, factor2_sims, equal_var=False)
+            if len(factor1_sims) > 1 and len(factor2_sims) > 1:
+                # Use Welch's t-test with proper DF
+                t_stat, p_val, df = welch_ttest_with_df(factor1_sims, factor2_sims)
                 effect_size = compute_cohens_d(factor1_sims, factor2_sims)
                 sig = get_significance_marker(p_val)
 
@@ -897,25 +947,49 @@ def analyze_pairwise_factor_comparisons(
                     'mean2': factor2_sims.mean(),
                     'difference': factor1_sims.mean() - factor2_sims.mean(),
                     't': t_stat,
+                    'df': df,
                     'p': p_val,
                     'd': effect_size,
-                    'sig': sig
+                    'sig': sig,
+                    'n1': len(factor1_sims),
+                    'n2': len(factor2_sims)
                 })
 
-    pairs_df = pd.DataFrame(factor_pairs).sort_values('d', key=abs, ascending=False)
+    pairs_df = pd.DataFrame(factor_pairs)
+    
+    if len(pairs_df) == 0:
+        if verbose:
+            print("No valid pairwise comparisons found.")
+        return pairs_df
+    
+    # Apply Bonferroni correction
+    n_comparisons = len(pairs_df)
+    bonferroni_alpha = 0.05 / n_comparisons
+    pairs_df['p_bonferroni'] = pairs_df['p'] * n_comparisons
+    pairs_df['p_bonferroni'] = pairs_df['p_bonferroni'].clip(upper=1.0)  # Cap at 1.0
+    pairs_df['sig_bonferroni'] = pairs_df['p_bonferroni'].apply(get_significance_marker)
+    
+    # Sort by absolute effect size
+    pairs_df = pairs_df.sort_values('d', key=abs, ascending=False)
 
     if verbose and len(pairs_df) > 0:
-        sig_pairs = pairs_df[pairs_df['sig'] != 'n.s.']
-        print(f"\nSignificant differences between {factor_name.lower()}s:")
+        print(f"\nApplied Bonferroni correction for {n_comparisons} comparisons")
+        print(f"Adjusted alpha level: {bonferroni_alpha:.4f}\n")
+        
+        sig_pairs = pairs_df[pairs_df['sig_bonferroni'] != 'n.s.']
+        print(f"Significant differences between {factor_name.lower()}s (after correction):")
         
         if len(sig_pairs) > 0:
             for _, row in sig_pairs.iterrows():
                 print(f"\n{row[f'{factor_name.lower()}1'].upper()} vs {row[f'{factor_name.lower()}2'].upper()}:")
                 print(f"  Means: {row['mean1']:.4f} vs {row['mean2']:.4f}")
                 print(f"  Difference: {row['difference']:.4f}")
-                print(f"  t = {row['t']:.3f}, p = {row['p']:.4f} {row['sig']}, d = {row['d']:.3f}")
+                print(f"  Welch's t({row['df']:.1f}) = {row['t']:.3f}")
+                print(f"  p = {row['p']:.4f} → p_bonf = {row['p_bonferroni']:.4f} {row['sig_bonferroni']}")
+                print(f"  Cohen's d = {row['d']:.3f}")
         else:
-            print(f"  No significant differences found")
+            print(f"  No significant differences found after Bonferroni correction")
+            print(f"  (Without correction: {len(pairs_df[pairs_df['sig'] != 'n.s.'])} were significant)")
 
     return pairs_df
 
@@ -990,8 +1064,8 @@ def analyze_within_vs_between_factor(
     # Statistical tests
     results = []
     
-    # Overall: Within vs Between
-    t_stat, p_val = ttest_ind(within_all, between_all, equal_var=False)
+    # Overall: Within vs Between with proper DF
+    t_stat, p_val, df = welch_ttest_with_df(pd.Series(within_all), pd.Series(between_all))
     d = compute_cohens_d(pd.Series(within_all), pd.Series(between_all))
     sig = get_significance_marker(p_val)
     
@@ -1007,6 +1081,7 @@ def analyze_within_vs_between_factor(
         'n2': len(between_all),
         'difference': np.mean(within_all) - np.mean(between_all),
         't': t_stat,
+        'df': df,
         'p': p_val,
         'sig': sig,
         'd': d
@@ -1017,7 +1092,7 @@ def analyze_within_vs_between_factor(
         print(f"  Within-{factor_name}: M={np.mean(within_all):.4f}, SD={np.std(within_all):.4f} (N={len(within_all)})")
         print(f"  Between-{factor_name}: M={np.mean(between_all):.4f}, SD={np.std(between_all):.4f} (N={len(between_all)})")
         print(f"  Difference: {np.mean(within_all) - np.mean(between_all):.4f}")
-        print(f"  Welch's t({len(within_all) + len(between_all) - 2}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
+        print(f"  Welch's t({df:.1f}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
         print(f"  Cohen's d = {d:.3f}")
     
     # Individual factors vs Between
@@ -1026,8 +1101,8 @@ def analyze_within_vs_between_factor(
     
     for factor in factors:
         within_factor = within_by_factor[factor]
-        if len(within_factor) > 0:
-            t_stat, p_val = ttest_ind(within_factor, between_all, equal_var=False)
+        if len(within_factor) > 1:
+            t_stat, p_val, df = welch_ttest_with_df(pd.Series(within_factor), pd.Series(between_all))
             d = compute_cohens_d(pd.Series(within_factor), pd.Series(between_all))
             sig = get_significance_marker(p_val)
             
@@ -1043,6 +1118,7 @@ def analyze_within_vs_between_factor(
                 'n2': len(between_all),
                 'difference': np.mean(within_factor) - np.mean(between_all),
                 't': t_stat,
+                'df': df,
                 'p': p_val,
                 'sig': sig,
                 'd': d
@@ -1052,7 +1128,7 @@ def analyze_within_vs_between_factor(
                 print(f"\n{factor.upper()} vs Between:")
                 print(f"  Within-{factor}: M={np.mean(within_factor):.4f}, SD={np.std(within_factor):.4f} (N={len(within_factor)})")
                 print(f"  Between: M={np.mean(between_all):.4f}, SD={np.std(between_all):.4f} (N={len(between_all)})")
-                print(f"  t = {t_stat:.3f}, p = {p_val:.4f} {sig}, d = {d:.3f}")
+                print(f"  Welch's t({df:.1f}) = {t_stat:.3f}, p = {p_val:.4f} {sig}, d = {d:.3f}")
     
     results_df = pd.DataFrame(results)
     
@@ -1145,23 +1221,10 @@ def _plot_within_vs_between(
     ax.grid(axis='y', alpha=0.3)
     ax.set_xticklabels(categories, rotation=45, ha='right', fontsize=10)
     
-    # Add significance annotations
-    # Between vs Within (pooled)
-    overall_result = results_df.iloc[0]
-    y_max = plot_df['similarity'].max()
-    y_pos = y_max + 0.08
-    
-    ax.plot([0, 1], [y_pos, y_pos], 'k-', linewidth=2)
-    ax.plot([0, 0], [y_pos - 0.01, y_pos], 'k-', linewidth=2)
-    ax.plot([1, 1], [y_pos - 0.01, y_pos], 'k-', linewidth=2)
-    ax.text(0.5, y_pos + 0.01, f"d = {overall_result['d']:.3f} {overall_result['sig']}",
-           ha='center', va='bottom', fontsize=10, fontweight='bold',
-           bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
-    
     # Add sample sizes
     for i, cat in enumerate(categories):
         n = len(plot_df[plot_df['category'] == cat])
-        ax.text(i, -0.05, f'n={n}', ha='center', va='top',
+        ax.text(i, 0.05, f'n={n}', ha='center', va='top',
                transform=ax.get_xaxis_transform(), fontsize=9, style='italic')
     
     plt.tight_layout()
@@ -1186,9 +1249,18 @@ def analyze_factor_clip_vs_context(
 ) -> pd.DataFrame:
     """
     Compare clip-driven vs. context-driven effects within each factor level.
-
-    For Context: Uses OR logic for clip-driven (captures cross-context comparisons)
-    For Genre: Uses AND logic for both (pure within-genre comparisons)
+    
+    CORRECTED LOGIC - ASYMMETRIC:
+    - Context uses OR logic for clip-driven (necessary because contexts differ by definition)
+    - Genre uses AND logic for both (both docs can be same genre across different contexts)
+    
+    For Context analysis:
+    - Clip-driven: same_clip_diff_context AND (context_i OR context_j == target)
+    - Context-driven: diff_clip_same_context AND both contexts == target
+    
+    For Genre analysis:
+    - Clip-driven: same_clip_diff_context AND both genres == target
+    - Context-driven: diff_clip_diff_context_same_genre AND both genres == target
 
     Parameters
     -----------
@@ -1206,51 +1278,63 @@ def analyze_factor_clip_vs_context(
     Returns
     --------
     pd.DataFrame
-        Comparison statistics for each factor level
+        Comparison statistics for each factor level with Bonferroni correction
     """
     if verbose:
         print(f"\n\n3. {factor_name.upper()}-SPECIFIC COMPARISON: Clip vs. Context Effects")
         print("-" * 70)
         print(f"For each {factor_name.lower()}, comparing:")
-        print("  - Clip-driven similarity: same clip heard in DIFFERENT contexts")
-        print("  - Context-driven similarity: DIFFERENT clips heard in the same context")
-
         if factor_name == 'Context':
-            print("\nNote: Clip-driven uses OR logic (at least one doc from target context)")
-            print("      Context-driven uses AND logic (both docs from target context)\n")
+            print("  - Clip-driven: same clip in DIFFERENT contexts (target context involved - OR logic)")
+            print("  - Context-driven: DIFFERENT clips in the same context (both docs from target context)")
         else:
-            print(f"\nNote: Both use AND logic (both docs from target {factor_name.lower()})\n")
+            print("  - Clip-driven: same clip in DIFFERENT contexts (both docs from target genre - AND logic)")
+            print("  - Context-driven: DIFFERENT clips from same genre in DIFFERENT contexts (both from target genre)")
+        print("\n  NOTE: Uses ASYMMETRIC logic - OR for context, AND for genre\n")
 
     factor_key = get_factor_key(factor_column)
     moderator_results = []
     factors = metadata[factor_column].unique()
 
     for factor in factors:
-        # CLIP-DRIVEN filter
+        # CLIP-DRIVEN filter - ASYMMETRIC LOGIC (necessary!)
         if factor_name == 'Context':
+            # For context: use OR logic because contexts must differ in same_clip_diff_context
             clip_filter = (
                 (sim_df['condition'] == 'same_clip_diff_context') &
                 ((sim_df[f'{factor_key}_i'] == factor) | (sim_df[f'{factor_key}_j'] == factor))
             )
-        else:
+        else:  # Genre
+            # For genre: use AND logic because same clip can have same genre across contexts
             clip_filter = (
                 (sim_df['condition'] == 'same_clip_diff_context') &
                 (sim_df[f'{factor_key}_i'] == factor) &
                 (sim_df[f'{factor_key}_j'] == factor)
             )
-
+        
         clip_sims = sim_df[clip_filter]['similarity']
 
-        # CONTEXT-DRIVEN filter (always AND logic)
-        context_filter = (
-            (sim_df['condition'] == 'diff_clip_same_context') &
-            (sim_df[f'{factor_key}_i'] == factor) &
-            (sim_df[f'{factor_key}_j'] == factor)
-        )
+        # CONTEXT-DRIVEN filter - ALWAYS AND LOGIC
+        if factor_name == 'Context':
+            # For context: different clips, same context
+            context_filter = (
+                (sim_df['condition'] == 'diff_clip_same_context') &
+                (sim_df[f'{factor_key}_i'] == factor) &
+                (sim_df[f'{factor_key}_j'] == factor)
+            )
+        else:  # Genre
+            # For genre: different clips, same genre, different contexts (to isolate genre)
+            context_filter = (
+                (sim_df['condition'] == 'diff_clip_diff_context_same_genre') &
+                (sim_df[f'{factor_key}_i'] == factor) &
+                (sim_df[f'{factor_key}_j'] == factor)
+            )
+        
         context_sims = sim_df[context_filter]['similarity']
 
-        if len(clip_sims) > 0 and len(context_sims) > 0:
-            t_stat, p_val = stats.ttest_ind(clip_sims, context_sims, equal_var=False)
+        if len(clip_sims) > 1 and len(context_sims) > 1:
+            # Use Welch's t-test with proper DF
+            t_stat, p_val, df = welch_ttest_with_df(clip_sims, context_sims)
             effect_size = compute_cohens_d(clip_sims, context_sims)
             sig = get_significance_marker(p_val)
 
@@ -1263,6 +1347,7 @@ def analyze_factor_clip_vs_context(
                 'difference': clip_sims.mean() - context_sims.mean(),
                 'effect_size': effect_size,
                 't': t_stat,
+                'df': df,
                 'p': p_val,
                 'sig': sig,
                 'n_clip': len(clip_sims),
@@ -1274,7 +1359,7 @@ def analyze_factor_clip_vs_context(
                 print(f"  Clip-driven: M={clip_sims.mean():.4f}, SD={clip_sims.std():.4f} (N={len(clip_sims)})")
                 print(f"  Context-driven: M={context_sims.mean():.4f}, SD={context_sims.std():.4f} (N={len(context_sims)})")
                 print(f"  Difference: {clip_sims.mean() - context_sims.mean():.4f}")
-                print(f"  t({len(clip_sims) + len(context_sims) - 2}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
+                print(f"  Welch's t({df:.1f}) = {t_stat:.3f}, p = {p_val:.4f} {sig}")
                 print(f"  Cohen's d = {effect_size:.3f}")
 
                 if sig != "n.s.":
@@ -1286,11 +1371,26 @@ def analyze_factor_clip_vs_context(
                     print(f"  → In {factor}, clip and context have comparable effects")
 
     if len(moderator_results) == 0:
+        if verbose:
+            print("\nWARNING: No valid comparisons found. Check data filtering.")
         return pd.DataFrame()
 
     moderator_df = pd.DataFrame(moderator_results)
+    
+    # Apply Bonferroni correction
+    n_comparisons = len(moderator_df)
+    bonferroni_alpha = 0.05 / n_comparisons
+    moderator_df['p_bonferroni'] = moderator_df['p'] * n_comparisons
+    moderator_df['p_bonferroni'] = moderator_df['p_bonferroni'].clip(upper=1.0)
+    moderator_df['sig_bonferroni'] = moderator_df['p_bonferroni'].apply(get_significance_marker)
 
     if verbose:
+        print(f"\n{'-'*70}")
+        print(f"BONFERRONI CORRECTION APPLIED")
+        print(f"Number of comparisons: {n_comparisons}")
+        print(f"Adjusted alpha: {bonferroni_alpha:.4f}")
+        print("-"*70)
+        
         _print_moderator_summary(moderator_df, factor_name, factor_column, sim_df)
 
     return moderator_df
@@ -1302,34 +1402,44 @@ def _print_moderator_summary(
     factor_column: str,
     sim_df: pd.DataFrame
 ) -> None:
-    """Helper function to print moderator analysis summary."""
+    """Helper function to print moderator analysis summary using Bonferroni-corrected results."""
     print(f"\n{'-'*70}")
-    print(f"{factor_name.upper()}-SPECIFIC SUMMARY")
+    print(f"{factor_name.upper()}-SPECIFIC SUMMARY (Bonferroni-corrected)")
     print("-"*70)
 
+    # Use Bonferroni-corrected significance
+    sig_col = 'sig_bonferroni' if 'sig_bonferroni' in moderator_df.columns else 'sig'
+    
     clip_dominant = moderator_df[
-        (moderator_df['difference'] > 0) & (moderator_df['sig'] != 'n.s.')
+        (moderator_df['difference'] > 0) & (moderator_df[sig_col] != 'n.s.')
     ]
     context_dominant = moderator_df[
-        (moderator_df['difference'] < 0) & (moderator_df['sig'] != 'n.s.')
+        (moderator_df['difference'] < 0) & (moderator_df[sig_col] != 'n.s.')
     ]
-    no_difference = moderator_df[moderator_df['sig'] == 'n.s.']
+    no_difference = moderator_df[moderator_df[sig_col] == 'n.s.']
 
     print(f"\nAcross {len(moderator_df)} {factor_name.lower()}s:")
-    print(f"  Clip-dominant: {len(clip_dominant)}")
+    print(f"  Clip-dominant (after correction): {len(clip_dominant)}")
     if len(clip_dominant) > 0:
         print(f"    {', '.join(clip_dominant[factor_name.lower()].values)}")
 
-    print(f"  Context-dominant: {len(context_dominant)}")
+    print(f"  Context-dominant (after correction): {len(context_dominant)}")
     if len(context_dominant) > 0:
         print(f"    {', '.join(context_dominant[factor_name.lower()].values)}")
 
-    print(f"  No significant difference: {len(no_difference)}")
+    print(f"  No significant difference (after correction): {len(no_difference)}")
     if len(no_difference) > 0:
         print(f"    {', '.join(no_difference[factor_name.lower()].values)}")
 
     print(f"\n  Mean effect size (|d|): {moderator_df['effect_size'].abs().mean():.3f}")
     print(f"  Range: {moderator_df['effect_size'].min():.3f} to {moderator_df['effect_size'].max():.3f}")
+    
+    # Show comparison with uncorrected results if available
+    if 'sig' in moderator_df.columns and 'sig_bonferroni' in moderator_df.columns:
+        n_sig_uncorrected = len(moderator_df[moderator_df['sig'] != 'n.s.'])
+        n_sig_corrected = len(moderator_df[moderator_df['sig_bonferroni'] != 'n.s.'])
+        print(f"\n  Significant before correction: {n_sig_uncorrected}")
+        print(f"  Significant after correction: {n_sig_corrected}")
 
 
 def analyze_factor_consistency(
@@ -1370,11 +1480,12 @@ def analyze_factor_consistency(
 
     factor_key = get_factor_key(factor_column)
 
-    # Determine condition filter
+    # STANDARDIZED condition filter
     if factor_name == 'Context':
         condition_filter = sim_df['condition'] == 'diff_clip_same_context'
     else:  # Genre
-        condition_filter = (sim_df['same_genre'] == True) & (sim_df['same_clip'] == False)
+        # FIXED: Use explicit condition to isolate genre effect
+        condition_filter = sim_df['condition'] == 'diff_clip_diff_context_same_genre'
 
     # Calculate CV for each factor
     consistency_results = []
@@ -1957,10 +2068,12 @@ def create_comparative_clip_vs_context_effects_figure(
     context_moderator_df: pd.DataFrame,
     genre_moderator_df: pd.DataFrame,
     output_path: str,
-    figsize: Tuple[int, int] = (16, 12)
+    figsize: Tuple[int, int] = (16, 12),
+    verbose: bool = True
 ) -> plt.Figure:
     """
     Side-by-side comparison of clip vs. context effects by factor.
+    Now uses Bonferroni-corrected significance markers if available.
     
     Layout (2x2):
     A - Context: Clip vs. Context means
@@ -1968,8 +2081,23 @@ def create_comparative_clip_vs_context_effects_figure(
     C - Context: Effect sizes
     D - Genre: Effect sizes
     """
+    # Debug output
+    if verbose:
+        print(f"\nDEBUG - create_comparative_clip_vs_context_effects_figure:")
+        print(f"  context_moderator_df shape: {context_moderator_df.shape}")
+        print(f"  genre_moderator_df shape: {genre_moderator_df.shape}")
+        if len(context_moderator_df) > 0:
+            print(f"  context_moderator_df columns: {list(context_moderator_df.columns)}")
+            print(f"  context_moderator_df head:\n{context_moderator_df.head()}")
+        if len(genre_moderator_df) > 0:
+            print(f"  genre_moderator_df columns: {list(genre_moderator_df.columns)}")
+    
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.25)
+
+    # Determine which significance column to use
+    context_sig_col = 'sig_bonferroni' if 'sig_bonferroni' in context_moderator_df.columns else 'sig'
+    genre_sig_col = 'sig_bonferroni' if 'sig_bonferroni' in genre_moderator_df.columns else 'sig'
 
     # PANEL A: Context clip vs. context means
     ax_a = fig.add_subplot(gs[0, 0])
@@ -1995,13 +2123,15 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_a.grid(axis='y', alpha=0.3)
 
         for i, (idx, row) in enumerate(context_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[context_sig_col] != 'n.s.':
                 y_pos = max(row['clip_mean'], row['context_mean']) + 0.01
-                ax_a.text(i, y_pos, row['sig'], ha='center', va='bottom',
+                ax_a.text(i, y_pos, row[context_sig_col], ha='center', va='bottom',
                          fontsize=10, fontweight='bold')
     else:
         ax_a.text(0.5, 0.5, 'No data available',
                  ha='center', va='center', fontsize=12, transform=ax_a.transAxes)
+        if verbose:
+            print("  WARNING: Context moderator dataframe is empty!")
 
     # PANEL B: Genre clip vs. context means
     ax_b = fig.add_subplot(gs[0, 1])
@@ -2027,9 +2157,9 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_b.grid(axis='y', alpha=0.3)
 
         for i, (idx, row) in enumerate(genre_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[genre_sig_col] != 'n.s.':
                 y_pos = max(row['clip_mean'], row['context_mean']) + 0.01
-                ax_b.text(i, y_pos, row['sig'], ha='center', va='bottom',
+                ax_b.text(i, y_pos, row[genre_sig_col], ha='center', va='bottom',
                          fontsize=10, fontweight='bold')
     else:
         ax_b.text(0.5, 0.5, 'No data available',
@@ -2053,9 +2183,9 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_c.grid(axis='x', alpha=0.3)
 
         for i, (idx, row) in enumerate(context_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[context_sig_col] != 'n.s.':
                 x_pos = row['effect_size'] + (0.05 if row['effect_size'] > 0 else -0.05)
-                ax_c.text(x_pos, i, row['sig'], ha='left' if row['effect_size'] > 0 else 'right',
+                ax_c.text(x_pos, i, row[context_sig_col], ha='left' if row['effect_size'] > 0 else 'right',
                          va='center', fontsize=9, fontweight='bold')
     else:
         ax_c.text(0.5, 0.5, 'No data available',
@@ -2079,9 +2209,9 @@ def create_comparative_clip_vs_context_effects_figure(
         ax_d.grid(axis='x', alpha=0.3)
 
         for i, (idx, row) in enumerate(genre_sorted.iterrows()):
-            if row['sig'] != 'n.s.':
+            if row[genre_sig_col] != 'n.s.':
                 x_pos = row['effect_size'] + (0.05 if row['effect_size'] > 0 else -0.05)
-                ax_d.text(x_pos, i, row['sig'], ha='left' if row['effect_size'] > 0 else 'right',
+                ax_d.text(x_pos, i, row[genre_sig_col], ha='left' if row['effect_size'] > 0 else 'right',
                          va='center', fontsize=9, fontweight='bold')
     else:
         ax_d.text(0.5, 0.5, 'No data available',
@@ -2481,20 +2611,9 @@ def create_comprehensive_conditions_figure(
     ax_c.grid(axis='y', alpha=0.3, linestyle='--')
     ax_c.set_axisbelow(True)
 
-    y_max_c = sim_df['similarity'].max()
-    bracket_y_c = y_max_c + 0.08
-    ax_c.plot([0, 1], [bracket_y_c, bracket_y_c], 'k-', linewidth=2)
-    ax_c.plot([0, 0], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
-    ax_c.plot([1, 1], [bracket_y_c - 0.01, bracket_y_c], 'k-', linewidth=2)
-    ax_c.text(0.5, bracket_y_c + 0.01,
-              f"Primary Comparison\nd = {primary_comparison['d']:.3f} {primary_comparison['sig']}",
-              ha='center', va='bottom', fontsize=10, fontweight='bold',
-              bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7,
-                       edgecolor='black', linewidth=1.5))
-
     for i, cond in enumerate(order_all):
         n = len(sim_df[sim_df['condition'] == cond])
-        ax_c.text(i, -0.05, f'n={n}', ha='center', va='top',
+        ax_c.text(i, 0.03, f'n={n}', ha='center', va='bottom',
                   transform=ax_c.get_xaxis_transform(), fontsize=9, style='italic')
 
     overall_mean = sim_df['similarity'].mean()
@@ -2517,39 +2636,64 @@ def create_binary_comparisons_figure(
 ) -> plt.Figure:
     """
     Create figure showing all three binary comparisons side-by-side.
-    
-    Parameters
-    ----------
-    sim_df : pd.DataFrame
-        Similarity dataframe
-    binary_results : list of dict
-        Results from binary_comparisons() function
+
+    This version matches effect-label annotations to plots by searching the
+    binary_results for the human label (Clip/Genre/Context) instead of relying
+    on list ordering, preventing mix-ups when the caller provides results in a
+    different order or some entries are None.
     """
     fig, axes = plt.subplots(1, 3, figsize=figsize)
-    
-    comparisons = [
-        ('same_clip', 'Clip', ['#95a5a6', '#3498db'], binary_results[0]),
-        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6'], binary_results[2]),
-        ('same_context', 'Context', ['#e74c3c', '#95a5a6'], binary_results[1])
+
+    comparisons_meta = [
+        ('same_clip', 'Clip', ['#3498db', '#95a5a6']),
+        ('same_genre', 'Genre', ['#2ecc71', '#95a5a6']),
+        ('same_context', 'Context', ['#e74c3c', '#95a5a6']),
     ]
-    
-    for ax, (col, label, palette, result) in zip(axes, comparisons):
+
+    # helper to find matching result for a given human label
+    def _find_result_for_label(results, label):
+        if results is None:
+            return None
+        # if results is a dict potentially keyed by column/label
+        if isinstance(results, dict):
+            return results.get(label) or results.get(label.lower()) or results.get('same_' + label.lower())
+        # otherwise search list entries for the label appearing in the 'comparison' string
+        for r in results:
+            if r is None:
+                continue
+            comp = str(r.get('comparison', '')).lower()
+            if label.lower() in comp:
+                return r
+        return None
+
+    for ax, (col, label, palette) in zip(axes, comparisons_meta):
         data = sim_df.copy()
-        data['label'] = data[col].map({True: f'Same {label}', False: f'Different {label}'})
-        
-        sns.violinplot(data=data, x='label', y='similarity', ax=ax,
-                      order=[f'Same {label}', f'Different {label}'],
-                      hue='label', palette=palette, legend=False)
-        
+        # robust labeling even if column uses ints/strings/bools
+        data['label'] = np.where(data[col].astype(bool), f'Same {label}', f'Different {label}')
+
+        order = [f'Same {label}', f'Different {label}']
+        sns.violinplot(
+            data=data, x='label', y='similarity', ax=ax,
+            order=order, palette=palette, inner='box', linewidth=1.2
+        )
+
         ax.set_title(f'{label} Effect', fontsize=13, fontweight='bold')
         ax.set_xlabel('')
-        ax.set_ylabel('Cosine Similarity' if ax == axes[0] else '', fontsize=11)
-        
-        # Add effect size annotation
-        ax.text(0.5, 0.95, f"d = {result['d']:.3f} {result['sig']}",
-               ha='center', va='top', transform=ax.transAxes, fontsize=10,
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
+        ax.set_ylabel('Cosine Similarity' if ax is axes[0] else '', fontsize=11)
+
+        # find and annotate the matching result (if any)
+        result = _find_result_for_label(binary_results, label)
+        if result is not None:
+            try:
+                ax.text(
+                    0.5, 0.95, f"d = {result['d']:.3f} {result['sig']}",
+                    ha='center', va='top', transform=ax.transAxes, fontsize=10,
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.6)
+                )
+            except Exception:
+                # fail silently if fields missing
+                pass
+
     plt.tight_layout()
     return fig
 
