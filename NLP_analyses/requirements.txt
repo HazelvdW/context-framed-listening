@@ -1,0 +1,49 @@
+# Python dependencies for Framed Listening NLP pipelines
+# Covers:
+#   NLP-text-prep.qmd
+#   NLP-TFIDF-analysis.qmd
+#   NLP-SEmb-analysis.qmd          (sentence-embedding individual-level)
+#   NLP-model-comparison.qmd
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# For exact reproducibility, also apply constraints.txt:
+#   pip install -r requirements.txt --constraint constraints.txt
+#
+# Tested with Python 3.10 – 3.12
+
+# ── Core data / stats ──────────────────────────────────────────────────────────
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+
+# ── Machine learning / NLP ─────────────────────────────────────────────────────
+scikit-learn>=1.3
+
+# ── Text preprocessing (NLP-text-prep.qmd only) ───────────────────────────────
+nltk>=3.8
+pyspellchecker>=0.8
+
+# ── Sentence embeddings (NLP-SEmb-analysis.qmd, NLP-model-comparison.qmd) ─────
+sentence-transformers>=2.7
+# CPU-only torch install (sufficient for inference — no training):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# GPU (CUDA 12.1):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.1
+
+# ── Static word embeddings (NLP-model-comparison.qmd only) ────────────────────
+gensim>=4.3
+
+# ── Visualisation ──────────────────────────────────────────────────────────────
+matplotlib>=3.8
+seaborn>=0.13
+
+# ── TF-IDF visualisation (NLP-TFIDF-analysis.qmd only) ────────────────────────
+wordcloud>=1.9
+
+# ── R interface ────────────────────────────────────────────────────────────────
+# reticulate is an R package — see DESCRIPTION and renv.lock for R-side deps.
+# Point reticulate at this virtual environment with:
+#   reticulate::use_virtualenv(".venv", required = TRUE)

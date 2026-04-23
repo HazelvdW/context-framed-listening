@@ -1,0 +1,21 @@
+rank_type,text_a_orig,text_b_orig,TF-IDF,Word2Vec,BERT-base,MiniLM-L6-v2,mpnet-base-v2,paraphrase-mpnet
+top,rock band event,rock event,1.0,1.0,1.0,1.0,1.0,1.0
+top,watching a concert,watching a movie,1.0,1.0,1.0,1.0,1.0,1.0
+top,its an energetic rock song with a strong beat and a powerful electric guitar,it sounded like a energetic rock song with a strong beat and a powerful electric guitar,1.0,1.0,0.9662,0.9901,0.9837,0.9891
+top,imagined end credits of a game,sounded like the end credits of a movie,1.0,1.0,0.9239,0.9556,0.8766,0.9415
+top,a band playing on a stage more of a rock heavy metal band,a band on stage playing the song with big guitars like a heavy rock band,0.8116,0.9041,0.8561,0.9199,0.876,0.9286
+top,it sounded like a energetic rock song with a strong beat and a powerful electric guitar,it sounded like a energetic rock song with a powerful electric guitar,0.8129,0.8791,0.8354,0.9052,0.709,0.7464
+top,its an energetic rock song with a strong beat and a powerful electric guitar,it sounded like a energetic rock song with a powerful electric guitar,0.8129,0.8791,0.8315,0.8981,0.697,0.7196
+top,the tune gives a cinematic experience,the tune is cinematic,0.7606,0.8146,0.7935,0.8821,0.8586,0.9283
+top,the tune gives a cinematic experience,the tune is cinematic,0.7606,0.8146,0.7935,0.8821,0.8586,0.9283
+top,people dancing romantically in a bar,a romantic scene people dancing in each others arms,0.2377,0.779,0.8493,0.874,0.7203,0.8047
+bottom,i saw a silhouette of thor as he raised his hammer and lightning struck revealing his visage a warrior wearing an elk skull rose from the ground with his mighty axe in hand and he began charging,scenes of the city a tropical city like miami and or los angeles,0.0,0.2215,0.5112,-0.1769,-0.0335,-0.065
+bottom,it brought a memory where things were in a chaotic mess for me i had just lost my job and i could not think straight back then so i usually play hard rock music i thought that could make my worry less,the pianist is on stage playing his keys while the singer and dancers are waiting for their cue to begin performing,0.0,0.4113,0.563,-0.1796,-0.0195,-0.0229
+bottom,i could picture a guy struggling but preparing himself for the physical challenge he is embarking on,my thoughts were when i attended a concert they always play tunes like that,0.0,0.3406,0.5463,-0.1797,-0.0157,0.0264
+bottom,someone playing the guitar someone that looks like jason momoa probably because i have watched game of thrones recently then also occasionally some anime scenes,feel like i am at a work conference where a company is launching a new product not bar like at all,0.0,0.3453,0.6683,-0.1813,-0.0123,-0.0225
+bottom,a young man running,smoky bar room old movies glam women in dresses,0.0,0.4195,0.5886,-0.1814,-0.1583,-0.2003
+bottom,the character arrives at the beach section,i thought about my mum she had tons of records that sounded exactly like this we would listen to these nonstop back then,0.0,0.3127,0.379,-0.1864,0.0131,0.0124
+bottom,people are relaxing at the jazz club people are watching the band perform,an evil character making plans to kill someone in a cartoon,0.0,0.3122,0.6239,-0.1876,-0.1241,0.1547
+bottom,rainy stormy windows in a city apartment a girl feel reenergised and at peace by it,people are dancing at the disco people perform the soul train on the stage,0.0,0.4139,0.6853,-0.1882,-0.0817,0.0439
+bottom,its the ending title sequence of a movie its playing character bloopers in between the credits,made me think of jazz clubs where you can play poker and have food as well as smoke cigarettes in an underground poker club very cosy and relaxing atmosphere cigars smoke in the air,0.0,0.1925,0.5915,-0.1988,-0.0737,0.1169
+bottom,a giant man plodding along the street with a cheery grin on his face greeting everyone as he walks past,i thought of film noir crime and mystery films as well as two television series that used similar music matlock the series that aired in the 1980s and 90s and in the heat of the night this sounds like the soundtrack for a mystery or crime drama,0.0,0.3427,0.6293,-0.2099,-0.043,-0.0135

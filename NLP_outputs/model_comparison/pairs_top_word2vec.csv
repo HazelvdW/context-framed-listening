@@ -1,0 +1,11 @@
+idx_a,idx_b,similarity,text_a_model,text_b_model,text_a_orig,text_b_orig,clip_a,clip_b,context_a,context_b,same_clip,same_context,genre_a,genre_b,rank_type
+357,1430,1.0000000000000009,arcade,arcade,the music is in the arcade game,sounded just like arcade video game music,Met_MED_19,Ele_LOW_14,bar,movie,False,False,Metal,Electronic,top
+841,846,1.0000000000000009,event,event,rock band event,rock event,Met_LOW_14,Met_MED_20,concert,movie,False,False,Metal,Metal,top
+409,868,1.0000000000000007,hero,hero,guitar hero,i am playing guitar hero to this song i am rocking out,Met_MED_20,Met_MED_19,videogame,videogame,False,True,Metal,Metal,top
+1247,1431,1.0000000000000007,restaurant,restaurant,when am in a restaurant,sounded like music at a bar restaurant,Jaz_LOW_19,80s_LOW_02,bar,movie,False,False,Jazz,80s,top
+75,409,1.0000000000000007,hero,hero,sounds like it would be in guitar hero,guitar hero,Met_MED_20,Met_MED_20,videogame,videogame,True,True,Metal,Metal,top
+75,868,1.0000000000000007,hero,hero,sounds like it would be in guitar hero,i am playing guitar hero to this song i am rocking out,Met_MED_20,Met_MED_19,videogame,videogame,False,True,Metal,Metal,top
+1251,1358,1.0000000000000004,party,party,in a party,i imagined a party,80s_MED_08,80s_MED_08,concert,concert,True,True,80s,80s,top
+117,118,1.0000000000000002,energetic strong beat powerful electric,energetic strong beat powerful electric,its an energetic rock song with a strong beat and a powerful electric guitar,it sounded like a energetic rock song with a strong beat and a powerful electric guitar,Met_LOW_09,Jaz_LOW_19,concert,concert,False,True,Metal,Jazz,top
+655,1568,0.9999999999999999,watch,watch,watching a concert,i thought of watching movie with that sound,Met_LOW_14,Met_MED_20,concert,concert,False,True,Metal,Metal,top
+838,1253,0.9999999999999999,watch,watch,watching a movie,in a band when i was watching a movie,Ele_LOW_09,Met_LOW_09,movie,movie,False,True,Electronic,Metal,top

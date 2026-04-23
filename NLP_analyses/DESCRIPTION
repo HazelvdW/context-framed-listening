@@ -1,0 +1,22 @@
+Package: framedListeningNLP
+Title: Framed Listening — NLP Analysis Pipeline
+Version: 1.0.0
+Date: 2026-04-15
+Authors@R: person("Hazel A.", "van der Walle",
+                  email = "hazel.a.vanderwalle@durham.ac.uk",
+                  role  = c("aut", "cre"))
+Description: Quarto-based NLP analysis pipeline for the Framed Listening
+    research project (Durham University, Music). Analyses semantic
+    similarity of music-influenced mental content (MIMC) using TF-IDF,
+    Word2Vec, and sentence embedding models. Four pipelines:
+    text preprocessing, TF-IDF (combMIMC), sentence embeddings (individual),
+    and cross-model comparison.
+URL: https://github.com/HazelvdW/context-framed-listening
+License: CC BY 4.0
+Encoding: UTF-8
+Imports:
+    knitr (>= 1.45),
+    rmarkdown (>= 2.25),
+    reticulate (>= 1.35)
+Suggests:
+    quarto (>= 1.4)

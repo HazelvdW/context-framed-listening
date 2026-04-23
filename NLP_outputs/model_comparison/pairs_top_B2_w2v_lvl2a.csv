@@ -1,0 +1,11 @@
+idx_a,idx_b,similarity,text_a_model,text_b_model,text_a_orig,text_b_orig,clip_a,clip_b,context_a,context_b,same_clip,same_context,genre_a,genre_b,rank_type
+357,1430,1.0000000000000009,arcade,arcade,the music is in the arcade game,sounded just like arcade video game music,Met_MED_19,Ele_LOW_14,bar,movie,False,False,Metal,Electronic,top
+1247,1431,1.0000000000000007,restaurant,restaurant,when am in a restaurant,sounded like music at a bar restaurant,Jaz_LOW_19,80s_LOW_02,bar,movie,False,False,Jazz,80s,top
+75,868,1.0000000000000007,hero,hero,sounds like it would be in guitar hero,i am playing guitar hero to this song i am rocking out,Met_MED_20,Met_MED_19,videogame,videogame,False,True,Metal,Metal,top
+117,118,1.0000000000000002,energetic strong beat powerful electric,energetic strong beat powerful electric,its an energetic rock song with a strong beat and a powerful electric guitar,it sounded like a energetic rock song with a strong beat and a powerful electric guitar,Met_LOW_09,Jaz_LOW_19,concert,concert,False,True,Metal,Jazz,top
+627,638,0.9999999999999999,car racing,car racing,it sounds like the music from a car racing game,i imagined a car racing game for this scene,Jaz_LOW_19,Met_MED_19,videogame,videogame,False,True,Jazz,Metal,top
+1253,1568,0.9999999999999999,watch,watch,in a band when i was watching a movie,i thought of watching movie with that sound,Met_LOW_09,Met_MED_20,movie,concert,False,False,Metal,Metal,top
+141,648,0.9999999999999998,watch romantic,watch romantic,i am watching a romantic movie from the 90s and this is playing,watching a romantic scene on a movie,Jaz_MED_07,Jaz_MED_07,videogame,movie,True,False,Jazz,Jazz,top
+952,1432,0.9999999999999986,end credit,end credit,imagined end credits of a game,sounded like the end credits of a movie,80s_LOW_02,80s_MED_08,videogame,concert,False,False,80s,80s,top
+863,952,0.9999999999999986,credit end,end credit,sounds like a song that plays for the credits at the end of a movie,imagined end credits of a game,Ele_LOW_09,80s_LOW_02,movie,videogame,False,False,Electronic,80s,top
+863,1432,0.9999999999999986,credit end,end credit,sounds like a song that plays for the credits at the end of a movie,sounded like the end credits of a movie,Ele_LOW_09,80s_MED_08,movie,concert,False,False,Electronic,80s,top

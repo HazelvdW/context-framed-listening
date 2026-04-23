@@ -1,0 +1,21 @@
+rank_type,text_a_orig,text_b_orig,BERT-individual,MiniLM-L6-v2,mpnet-base-v2,paraphrase-mpnet
+top,watching a concert,watching a movie,1.0,0.1673,0.2885,0.345
+top,rock band event,rock event,1.0,0.229,0.1856,0.1525
+top,its an energetic rock song with a strong beat and a powerful electric guitar,it sounded like a energetic rock song with a strong beat and a powerful electric guitar,0.9662,0.9901,0.9837,0.9891
+top,the tune is entertaining,the tune is relaxing,0.9431,0.7808,0.5806,0.5709
+top,the tune is relaxing,the tune is entertaining,0.9431,0.7808,0.5806,0.5709
+top,the tune is relaxing,the tune is entertaining,0.9431,0.7808,0.5806,0.5709
+top,the tune is relaxing,the tune is entertaining,0.9431,0.7808,0.5806,0.5709
+top,the tune is relaxing,the tune is entertaining,0.9431,0.7808,0.5806,0.5709
+top,the tune is relaxing,the tune is entertaining,0.9431,0.7808,0.5806,0.5709
+top,the tune is relaxing,the tune is entertaining,0.9431,0.7808,0.5806,0.5709
+bottom,i found it quite hard to imagine this being played in a bar it felt more suited towards a pub or some kind of music specialist place however i could picture lots of people at the bar dressed in black leather studded clothing and rocking their heads back and forth with tattoos,country music,0.0698,0.1679,0.1501,0.3209
+bottom,i am in japan its the 80s during the summer me and my girlfriend are in a night out in town shes wearing a nice dress we both have sun kissed skin and the glow of teenage youth she smiles at me and i smile back at her we go from the city to a club and were dancing as we stare into eachothers eyes wi…,country music,0.0685,0.1368,0.2582,0.1783
+bottom,i imagined a group of people in a skate park all skating passing each other by high fiving some people talking and spectating others trying to do trick shots with their skate boards and others flying in the air because of the ramps,country music,0.0679,0.2856,0.4242,0.4247
+bottom,i can see a big futuristic boss with a well armed character who is flitting around dodging slamming sword attacks whilst managing to get in a few attacks themselves the boss slams down his sword and the character runs up along it to take down the boss,country music,0.0667,0.2261,0.3913,0.257
+bottom,if this was playing in a bar i would walk out i also did not like this but it did make me think i was about to start a war or head into battle but this was very unenjoyable,country music,0.0665,0.2516,0.3571,0.3579
+bottom,i imagined hanging out at a laidback bar with friends on a weekend the music is smooth and relaxed setting a chill mood where everyones just talking laughing and unwinding people were sitting at the bar sipping drinks and just enjoying the easygoing vibe,country music,0.0652,0.4195,0.4468,0.5776
+bottom,i imagined a intense chase and fight scene starting off in slow motion with running a man catching up to another man ready to throw a punch and the other man karate kicking him the slow motion stops and the fight intensifies and speeds up when the music gets faster,country music,0.0625,0.2429,0.3273,0.3197
+bottom,this either made me think i was waiting in an elevator in a very tall building i guess the beating percussion is good for that or in a fun club in the 1920s dancing with all my friends,country music,0.0609,0.1615,0.2264,0.1675
+bottom,i imagined a large piano as well as a jazz musician holding a saxophone i am not sure if i heard a saxophone in the music though at the beginning of the music clip i imagined gothic architecture such as a gothic mansion with tall iron gates i also envisioned a romantic cafe scene in a city like pari…,country music,0.0607,0.1699,0.1641,0.1978
+bottom,its black and white a detective is sitting at the bar smoking they are panning around in an opening title sequence he has case files spewed about in front of him hes a regular a glass of whiskey neat sweats next to him as he looks over the crowd,country music,0.0601,0.1632,0.1143,0.1682

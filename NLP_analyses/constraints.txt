@@ -1,0 +1,23 @@
+# Exact version pins for full reproducibility
+# Use alongside requirements.txt:
+#   pip install -r requirements.txt --constraint constraints.txt
+#
+# Generated from development environment (Python 3.12.3).
+# Versions marked * were not installed in the build environment —
+# minimum bounds are set from known stable releases.
+#
+# More recent versions will likely work; use requirements.txt alone
+# if you encounter dependency conflicts.
+
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.1
+scikit-learn==1.5.1
+nltk==3.8.1               # *
+pyspellchecker==0.8.1     # *
+sentence-transformers==2.7.0  # *
+torch==2.3.1              # *
+gensim==4.3.2             # *
+matplotlib==3.9.1
+seaborn==0.13.2
+wordcloud==1.9.3          # *

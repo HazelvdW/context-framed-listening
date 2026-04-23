@@ -1,0 +1,1042 @@
+---
+title: "Framed Listening: Sentence Embedding Analyses (individual MIMC level)"
+author: "Hazel A. van der Walle (PhD student, Music, Durham University)"
+date: "23 April 2026"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+---
+
+All datasets generated and used for this study are openly available on GitHub:
+<https://github.com/HazelvdW/context-framed-listening>.
+
+This document analyses **semantic** similarity between individual music-influenced
+mental content (MIMC) descriptions using sentence embeddings and cosine similarity.
+It is the third pipeline in the analysis chain and the only one where all five
+condition categories are fully available.
+
+**Position in the analysis chain:**
+
+| Document | Method | Level | N texts | RQ2b available? |
+|---|---|---|---|---|
+| `NLP-TFIDF-analysis.qmd` | TF-IDF | combMIMC (aggregated) | 64 | No |
+| `NLP-SEmb-analysis.qmd` **(this doc)** | **Sentence embeddings** | **Individual MIMC** | **N per participant** | **Yes** |
+
+At the individual level, each row is one participant's MIMC description for one
+clip × context cell. This means `Sclip_Scontext` pairs (same clip, same context,
+different participants) now exist and are fully populated, enabling RQ2b
+(combined alignment advantage) to be tested for the first time in the pipeline.
+
+**Model selection note**: `all-MiniLM-L6-v2` is used as the default model. 
+It was fine-tuned specifically for semantic similarity on diverse sentence-level 
+text and performs strongly on short inputs (3–128 tokens), matching the short 
+length of individual MIMC descriptions. The model name is set in a single config 
+variable below and can be swapped without modifying any other code — see the
+model comparison note in the setup section for alternatives including mpnet.
+
+Analyses mirror the combMIMC pipeline in structure, conditions, and research
+questions exactly.
+
+---
+
+## Setup
+
+```{r setup-r, echo=FALSE}
+library(reticulate)
+
+# Uncomment to install Python packages on first run:
+ reticulate::py_install(c(
+   "pandas", "numpy", "scipy", "scikit-learn",
+   "matplotlib", "seaborn", "sentence-transformers", "torch"
+ ), pip = TRUE)
+```
+
+```{python setup-python, echo=FALSE}
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from itertools import combinations
+from matplotlib.patches import Patch
+
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition    import TruncatedSVD
+from sklearn.manifold         import TSNE
+from scipy                    import stats
+from scipy.stats              import kruskal, mannwhitneyu
+from sentence_transformers    import SentenceTransformer, models as st_models
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+base_path  = (
+    "/Users/hazelaileenvanderwalle/Library/CloudStorage/"
+    "OneDrive-Personal/work/study/PhD/_PROJECT/"
+    "_framedListening_NLP/context-framed-listening"
+)
+output_dir = f"{base_path}/NLP_outputs/SentenceEmbedding"
+os.makedirs(output_dir, exist_ok=True)
+print(f"Output directory: {output_dir}")
+```
+
+```{python version-check, echo=FALSE}
+# ── Environment version check ──────────────────────────────────────────────────
+import importlib, sys
+from packaging.version import Version
+
+REQUIREMENTS = {
+    "numpy":                "1.26",
+    "pandas":               "2.1",
+    "scipy":                "1.11",
+    "sklearn":              "1.3",    # scikit-learn
+    "matplotlib":           "3.8",
+    "seaborn":              "0.13",
+    "sentence_transformers": "2.7",   # sentence-transformers
+    "torch":                "2.1",
+}
+
+print(f"Python {sys.version}")
+print("-" * 52)
+all_ok = True
+for pkg, min_ver in REQUIREMENTS.items():
+    try:
+        mod = importlib.import_module(pkg)
+        ver = getattr(mod, "__version__", "unknown")
+        ok  = Version(ver) >= Version(min_ver) if ver != "unknown" else True
+        status = "OK" if ok else f"WARNING — expected >={min_ver}"
+        if not ok:
+            all_ok = False
+        print(f"  {pkg:<26} {ver:<12} {status}")
+    except ImportError:
+        print(f"  {pkg:<26} NOT INSTALLED  ERROR")
+        all_ok = False
+if all_ok:
+    print("\nAll package versions OK.")
+else:
+    print("\nOne or more issues — run: pip install -r requirements.txt")
+```
+
+```{python setup-python-MODEL, echo=FALSE}
+# ── Model configuration ────────────────────────────────────────────────────────
+# Change MODEL_NAME here to swap model; all downstream code adjusts automatically.
+#
+# Recommended options for short text:
+#   "sentence-transformers/all-MiniLM-L6-v2"    <- DEFAULT: fast, strong on short text
+#   "...           /paraphrase-MiniLM-L3-v2"    <- lightest/fastest
+#   "sentence-transformers/all-mpnet-base-v2"   <- higher quality, slower
+#   "...           /paraphrase-mpnet-base-v2"   <- tuned for paraphrase detection and semantic equivalence
+#   "vinai/bertweet-base"                       <- pretrained on tweets (short, informal)
+#   "princeton-nlp/sup-simcse-roberta-base"     <- contrastive learning on NLI data
+#
+# Models on the sentence-transformers hub (ST_NATIVE = True) have pooling config
+# baked in and load directly. Raw HuggingFace models (ST_NATIVE = False) need an
+# explicit mean-pooling wrapper — this is handled automatically in the embed block.
+
+MODEL_NAME    = "sentence-transformers/all-MiniLM-L6-v2"
+MODEL_SLUG    = MODEL_NAME.split("/")[-1]   # used in filenames
+MAX_SEQ_LEN   = 128                         # e.g. 128 MiniLM max; 512 for mpnet
+
+# Prefixes whose models are natively packaged for sentence-transformers
+ST_NATIVE = MODEL_NAME.startswith("sentence-transformers/")
+
+print(f"Model:            {MODEL_NAME}")
+print(f"Slug:             {MODEL_SLUG}")
+print(f"Max seq length:   {MAX_SEQ_LEN}")
+print(f"Native ST model:  {ST_NATIVE}")
+```
+
+---
+
+## Helper Functions
+
+```{python helpers}
+def sig_marker(p):
+    """Return significance marker string for a p-value."""
+    if p < 0.001: return "***"
+    if p < 0.01:  return "**"
+    if p < 0.05:  return "*"
+    return "n.s."
+
+
+def welch_t(g1, g2):
+    """Welch's t-test with Welch-Satterthwaite degrees of freedom.
+    Returns (t, p, df)."""
+    n1, n2 = len(g1), len(g2)
+    v1, v2 = g1.var(ddof=1), g2.var(ddof=1)
+    se     = np.sqrt(v1/n1 + v2/n2)
+    t      = (g1.mean() - g2.mean()) / se
+    df     = (v1/n1 + v2/n2)**2 / ((v1/n1)**2/(n1-1) + (v2/n2)**2/(n2-1))
+    p      = 2 * (1 - stats.t.cdf(abs(t), df))
+    return float(t), float(p), float(df)
+
+
+def cohens_d(g1, g2):
+    """Compute Cohen's d effect size."""
+    pooled = np.sqrt((g1.std()**2 + g2.std()**2) / 2)
+    return float((g1.mean() - g2.mean()) / pooled) if pooled > 0 else np.nan
+```
+
+---
+
+## Data Preparation
+
+### Load Data
+
+Load **`dataMIMC_preprocessed.csv`** — individual-level preprocessed MIMC
+descriptions, one row per participant × clip × context observation.
+
+```{python load-data, echo=FALSE}
+data_path = f"{base_path}/NLP_outputs/dataMIMC_preprocessed.csv"
+df        = pd.read_csv(data_path)
+
+# Drop rows with missing text
+n_before = len(df)
+df = df.dropna(subset=["textMIMC_lvl1a"]).reset_index(drop=True)
+n_after  = len(df)
+if n_before != n_after:
+    print(f"Dropped {n_before - n_after} rows with missing textMIMC_lvl1a")
+
+print(f"Shape:   {df.shape}")
+print(f"Columns: {df.columns.tolist()}")
+print(f"\nUnique clips:    {sorted(df['clip_name'].unique())}")
+print(f"Unique contexts: {sorted(df['context_word'].unique())}")
+print(f"Unique genres:   {sorted(df['clip_genre'].unique())}")
+print(f"\nTotal individual MIMC responses: {len(df)}")
+
+# Descriptive summary of text length
+df["text_len_words"] = df["textMIMC_lvl1a"].str.split().str.len()
+print(f"\nText length (words):")
+print(f"  Min:    {df['text_len_words'].min()}")
+print(f"  Median: {df['text_len_words'].median():.0f}")
+print(f"  Mean:   {df['text_len_words'].mean():.1f}")
+print(f"  Max:    {df['text_len_words'].max()}")
+print(f"  Texts > {MAX_SEQ_LEN} tokens (approx): "
+      f"{(df['text_len_words'] > MAX_SEQ_LEN * 0.75).sum()}  "
+      f"(word count is a rough proxy for token count)")
+
+df.head(4)
+```
+
+### Sentence Embeddings
+
+Encode each individual MIMC description using the configured model. Embeddings are
+cached to disk keyed to the model slug so re-runs skip encoding entirely, and
+switching models automatically triggers a fresh encode.
+
+```{python embed, echo=FALSE}
+embed_path = f"{output_dir}/embeddings_{MODEL_SLUG}.npy"
+
+if os.path.exists(embed_path):
+    embeddings = np.load(embed_path)
+    print(f"Loaded cached embeddings: {embeddings.shape}  ({MODEL_SLUG})")
+else:
+    print(f"Encoding {len(df)} texts with {MODEL_NAME} ...")
+    model = SentenceTransformer(MODEL_NAME)
+    model.max_seq_length = MAX_SEQ_LEN
+    embeddings = model.encode(
+        df["textMIMC_lvl1a"].tolist(),
+        batch_size        = 64,
+        show_progress_bar = True,
+        convert_to_numpy  = True,
+        normalize_embeddings = True    # L2 normalise -> cosine sim = dot product
+    )
+    np.save(embed_path, embeddings)
+    print(f"Saved embeddings: {embeddings.shape}  ->  {embed_path}")
+
+print(f"\nEmbedding matrix: {embeddings.shape[0]} texts × {embeddings.shape[1]} dims")
+print(f"L2 norms (should be ~1.0): "
+      f"min={np.linalg.norm(embeddings, axis=1).min():.4f}  "
+      f"max={np.linalg.norm(embeddings, axis=1).max():.4f}")
+```
+
+### Pairwise Similarity by Condition
+
+At the individual level the full N×N pairwise matrix is too large to hold in memory
+if N is large. Similarities are instead computed in batches and written directly to
+the condition records, avoiding materialising the full matrix.
+
+Each pair is annotated with the same five condition labels as the combMIMC pipeline.
+Because participants contribute one response per cell, `Sclip_Scontext` pairs now
+exist: two different participants who heard the same clip under the same context
+label.
+
+> **Note on non-independence**: pairs at the individual level are not independent —
+> each participant's response appears in multiple pairs. This is the same structure
+> as the combMIMC pairwise comparisons and is standard in semantic similarity
+> research of this kind. Welch's t-tests are used as in the combMIMC pipeline;
+> the pair is the unit of analysis.
+
+| Condition | Description |
+|---|---|
+| `Sclip_Scontext` | Same clip, same context — **different participants** — combined alignment |
+| `Sclip_Dcontext` | Same clip, different context — isolates **clip** influence |
+| `Dclip_Scontext` | Different clip, same context — isolates **context** influence |
+| `Dclip_Dcontext_Sgenre` | Both different, same genre |
+| `Dclip_Dcontext_Dgenre` | Entirely different — dissimilarity baseline |
+
+```{python extract-similarity, echo=FALSE}
+clips    = df["clip_name"].values
+contexts = df["context_word"].values
+genres   = df["clip_genre"].values
+n        = len(df)
+
+records = {k: [] for k in [
+    "item_i", "item_j", "similarity",
+    "same_clip", "same_context", "same_genre", "condition",
+    "context_i", "context_j", "genre_i", "genre_j"
+]}
+
+# Batch dot-product similarity (embeddings are L2-normalised so dot = cosine)
+BATCH = 256
+for i in range(n):
+    # Only upper triangle (j > i) to avoid duplicate pairs
+    sims_row = embeddings[i] @ embeddings[i+1:].T   # shape: (n - i - 1,)
+    for k, j in enumerate(range(i + 1, n)):
+        sc = clips[i]    == clips[j]
+        sx = contexts[i] == contexts[j]
+        sg = genres[i]   == genres[j]
+
+        if sc and sx:
+            cond = "Sclip_Scontext"
+        elif sc and not sx:
+            cond = "Sclip_Dcontext"
+        elif not sc and sx:
+            cond = "Dclip_Scontext"
+        else:
+            cond = "Dclip_Dcontext_Sgenre" if sg else "Dclip_Dcontext_Dgenre"
+
+        records["item_i"].append(i)
+        records["item_j"].append(j)
+        records["similarity"].append(float(sims_row[k]))
+        records["same_clip"].append(sc)
+        records["same_context"].append(sx)
+        records["same_genre"].append(sg)
+        records["condition"].append(cond)
+        records["context_i"].append(contexts[i])
+        records["context_j"].append(contexts[j])
+        records["genre_i"].append(genres[i])
+        records["genre_j"].append(genres[j])
+
+sim_df = pd.DataFrame(records)
+
+print(f"Total unique pairs: {len(sim_df):,}")
+print("\nCondition distribution:")
+print(sim_df["condition"].value_counts().sort_index().to_string())
+
+sim_df.to_csv(
+    f"{output_dir}/similarity_by_condition_{MODEL_SLUG}.csv", index=False)
+
+genre_list = sorted(df["clip_genre"].unique())
+ctx_list   = sorted(df["context_word"].unique())
+print("\nSaved similarity data")
+```
+
+---
+
+## RQ1 — Does Context Shape MIMC Similarity?
+
+**Logic**: Compare `Dclip_Scontext` (different music, same context label) against
+`Dclip_Dcontext_Dgenre` (everything different — the dissimilarity floor). If context
+drives convergence, pairs sharing a context label should be more similar than pairs
+sharing nothing.
+
+### Omnibus Test
+
+```{python omnibus-kruskal, echo=FALSE}
+all_conditions = [
+    "Sclip_Scontext",
+    "Sclip_Dcontext",
+    "Dclip_Scontext",
+    "Dclip_Dcontext_Sgenre",
+    "Dclip_Dcontext_Dgenre",
+]
+
+cond_groups = [sim_df.loc[sim_df["condition"] == c, "similarity"].values
+               for c in all_conditions if (sim_df["condition"] == c).any()]
+valid_conds = [c for c in all_conditions if (sim_df["condition"] == c).any()]
+
+H, p_kw = kruskal(*cond_groups)
+print("OMNIBUS KRUSKAL–WALLIS TEST ACROSS ALL CONDITIONS")
+print("=" * 60)
+print(f"  H({len(valid_conds)-1}) = {H:.3f},  p = {p_kw:.4e}  {sig_marker(p_kw)}")
+print(f"  Conditions tested: {valid_conds}")
+
+print("\nPost-hoc pairwise Mann–Whitney U  (Bonferroni corrected)")
+print("-" * 60)
+posthoc_pairs   = list(combinations(range(len(valid_conds)), 2))
+posthoc_results = []
+for i, j in posthoc_pairs:
+    g1, g2  = cond_groups[i], cond_groups[j]
+    u, p_mw = mannwhitneyu(g1, g2, alternative="two-sided")
+    d       = cohens_d(pd.Series(g1), pd.Series(g2))
+    posthoc_results.append(dict(
+        cond1=valid_conds[i], cond2=valid_conds[j],
+        mean1=g1.mean(), mean2=g2.mean(),
+        U=u, p=p_mw, d=d, n1=len(g1), n2=len(g2)
+    ))
+
+posthoc_df             = pd.DataFrame(posthoc_results)
+posthoc_df["p_bonf"]   = (posthoc_df["p"] * len(posthoc_df)).clip(upper=1.0)
+posthoc_df["sig_bonf"] = posthoc_df["p_bonf"].apply(sig_marker)
+posthoc_df             = posthoc_df.sort_values("d", key=abs, ascending=False)
+
+print(posthoc_df[["cond1","cond2","mean1","mean2","d","p","p_bonf","sig_bonf"]]
+      .to_string(index=False))
+posthoc_df.to_csv(
+    f"{output_dir}/omnibus_posthoc_{MODEL_SLUG}.csv", index=False)
+print(f"\nSaved omnibus post-hoc table")
+```
+
+### Context Effect: Dclip_Scontext vs Dclip_Dcontext_Dgenre
+
+```{python rq1-context-effect, echo=FALSE}
+ctx_sims      = sim_df.loc[sim_df["condition"] == "Dclip_Scontext",       "similarity"]
+baseline_sims = sim_df.loc[sim_df["condition"] == "Dclip_Dcontext_Dgenre", "similarity"]
+
+t, p, df_val = welch_t(ctx_sims, baseline_sims)
+d            = cohens_d(ctx_sims, baseline_sims)
+
+print("RQ1 — CONTEXT EFFECT")
+print("=" * 60)
+print(f"  Dclip_Scontext         M = {ctx_sims.mean():.4f}  (N = {len(ctx_sims):,})")
+print(f"  Dclip_Dcontext_Dgenre  M = {baseline_sims.mean():.4f}  (N = {len(baseline_sims):,})")
+print(f"  Delta = {ctx_sims.mean() - baseline_sims.mean():+.4f}")
+print(f"  Welch's t({df_val:.1f}) = {t:.3f},  p = {p:.4f}  {sig_marker(p)}")
+print(f"  Cohen's d = {d:.3f}")
+
+rq1_context = dict(
+    mean_ctx=float(ctx_sims.mean()), mean_base=float(baseline_sims.mean()),
+    delta=float(ctx_sims.mean()-baseline_sims.mean()),
+    t=t, df=df_val, p=p, sig=sig_marker(p), d=d,
+    n_ctx=len(ctx_sims), n_base=len(baseline_sims)
+)
+```
+
+### Visualisation
+
+```{python vis-rq1, echo=FALSE}
+# All four conditions including Sclip_Scontext (now available at individual level)
+rq1_conds = [
+    ("Dclip_Dcontext_Dgenre", "Baseline\n(All Diff)",          "#95a5a6"),
+    ("Dclip_Scontext",        "Same Context\n(Diff Clip)",     "#e74c3c"),
+    ("Sclip_Dcontext",        "Same Clip\n(Diff Context)",     "#3498db"),
+    ("Sclip_Scontext",        "Combined\n(Same Clip+Context)", "#9b59b6"),
+]
+present_rq1 = [(c, lbl, col) for c, lbl, col in rq1_conds
+               if (sim_df["condition"] == c).any()]
+
+fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+
+# Panel A: mean bars with 95% CI
+ax = axes[0]
+means_rq1, errs_rq1, lbls_rq1, cols_rq1 = [], [], [], []
+for cond, lbl, col in present_rq1:
+    g  = sim_df.loc[sim_df["condition"] == cond, "similarity"]
+    ci = stats.t.interval(0.95, len(g)-1, loc=g.mean(), scale=stats.sem(g))
+    means_rq1.append(g.mean())
+    errs_rq1.append((ci[1]-ci[0])/2)
+    lbls_rq1.append(lbl)
+    cols_rq1.append(col)
+
+ax.bar(range(len(means_rq1)), means_rq1, color=cols_rq1,
+       edgecolor="black", alpha=0.85)
+ax.errorbar(range(len(means_rq1)), means_rq1, yerr=errs_rq1,
+            fmt="none", ecolor="black", capsize=6, linewidth=2)
+ax.set_xticks(range(len(lbls_rq1)))
+ax.set_xticklabels(lbls_rq1, fontsize=10)
+ax.set_ylabel("Mean Cosine Similarity", fontsize=11)
+ax.set_title("A. Mean Similarity by Condition\n(95% CI error bars)",
+             fontsize=12, fontweight="bold")
+ax.grid(axis="y", alpha=0.3)
+if len(means_rq1) >= 2:
+    y_brack = max(means_rq1) + max(errs_rq1) + 0.01
+    ax.plot([0, 1], [y_brack, y_brack], "k-", linewidth=1.5)
+    ax.text(0.5, y_brack + 0.003, rq1_context["sig"],
+            ha="center", fontsize=11, fontweight="bold")
+
+# Panel B: violin distributions
+ax2 = axes[1]
+plot_data = pd.concat([
+    sim_df.loc[sim_df["condition"] == c, ["similarity"]].assign(label=lbl)
+    for c, lbl, _ in present_rq1
+])
+order_v   = [lbl for _, lbl, _ in present_rq1]
+palette_v = {lbl: col for _, lbl, col in present_rq1}
+sns.violinplot(data=plot_data, x="label", y="similarity",
+               order=order_v, hue="label", palette=palette_v,
+               legend=False, inner="box", linewidth=1.5, ax=ax2)
+ax2.set_xlabel("")
+ax2.set_ylabel("Cosine Similarity", fontsize=11)
+ax2.set_title("B. Similarity Distributions by Condition",
+              fontsize=12, fontweight="bold")
+ax2.grid(axis="y", alpha=0.3)
+
+plt.suptitle(f"RQ1: Does Context Shape MIMC Similarity?  [{MODEL_SLUG} — individual]",
+             fontsize=14, fontweight="bold")
+plt.tight_layout()
+plt.savefig(f"{output_dir}/RQ1_context_effect_{MODEL_SLUG}.png",
+            dpi=300, bbox_inches="tight")
+plt.show()
+```
+
+---
+
+## RQ2 — Music or Context: Which Drives Greater Convergence?
+
+**Logic**: `Sclip_Dcontext` (same clip, different contexts) isolates the music
+contribution; `Dclip_Scontext` (different clips, same context) isolates the context
+contribution. RQ2b tests whether aligning both factors (`Sclip_Scontext`) produces
+additional convergence beyond either alone — **this is the first pipeline in the
+chain where this test is available**, as individual-level data provides within-cell
+pairs across different participants.
+
+### Clip vs Context
+
+```{python rq2-clip-vs-context, echo=FALSE}
+clip_sims = sim_df.loc[sim_df["condition"] == "Sclip_Dcontext", "similarity"]
+ctx_sims  = sim_df.loc[sim_df["condition"] == "Dclip_Scontext", "similarity"]
+
+t, p, df_val = welch_t(clip_sims, ctx_sims)
+d            = cohens_d(clip_sims, ctx_sims)
+
+rq2_primary = dict(
+    mean_clip=float(clip_sims.mean()), mean_ctx=float(ctx_sims.mean()),
+    diff=float(clip_sims.mean()-ctx_sims.mean()),
+    t=t, df=df_val, p=p, sig=sig_marker(p), d=d,
+    n_clip=len(clip_sims), n_ctx=len(ctx_sims)
+)
+
+print("RQ2a — CLIP vs CONTEXT")
+print("=" * 60)
+print(f"  Sclip_Dcontext (clip-driven):    M = {rq2_primary['mean_clip']:.4f}  "
+      f"(N = {rq2_primary['n_clip']:,})")
+print(f"  Dclip_Scontext (context-driven): M = {rq2_primary['mean_ctx']:.4f}  "
+      f"(N = {rq2_primary['n_ctx']:,})")
+print(f"  Delta (clip − context): {rq2_primary['diff']:+.4f}")
+print(f"  Welch's t({df_val:.1f}) = {t:.3f},  p = {p:.4f}  {sig_marker(p)}")
+print(f"  Cohen's d = {d:.3f}")
+dominant = "CLIP" if rq2_primary["diff"] > 0 else "CONTEXT"
+print(f"\n-> {dominant} drives greater MIMC similarity at the individual level")
+```
+
+### RQ2b — Combined Advantage: Sclip_Scontext vs Single-Factor Conditions
+
+```{python rq2-combined, echo=FALSE}
+sc_sc = sim_df.loc[sim_df["condition"] == "Sclip_Scontext",  "similarity"]
+sc_dc = sim_df.loc[sim_df["condition"] == "Sclip_Dcontext",  "similarity"]
+dc_sc = sim_df.loc[sim_df["condition"] == "Dclip_Scontext",  "similarity"]
+
+combined_comparisons = [
+    ("Sclip_Scontext vs Sclip_Dcontext",
+     "Combined advantage over Clip-only",    sc_sc, sc_dc),
+    ("Sclip_Scontext vs Dclip_Scontext",
+     "Combined advantage over Context-only", sc_sc, dc_sc),
+]
+
+n_comb = len(combined_comparisons)
+print("RQ2b — COMBINED ALIGNMENT ADVANTAGE")
+print("=" * 65)
+print(f"  Sclip_Scontext  M={sc_sc.mean():.4f}  SD={sc_sc.std():.4f}  N={len(sc_sc):,}")
+print(f"  Sclip_Dcontext  M={sc_dc.mean():.4f}  SD={sc_dc.std():.4f}  N={len(sc_dc):,}")
+print(f"  Dclip_Scontext  M={dc_sc.mean():.4f}  SD={dc_sc.std():.4f}  N={len(dc_sc):,}")
+print(f"\nWelch's t-tests  (Bonferroni k={n_comb},  alpha_adj={0.05/n_comb:.4f})")
+print("-" * 65)
+
+combined_rows = []
+for label, description, g1, g2 in combined_comparisons:
+    t, p, df_val = welch_t(g1, g2)
+    d            = cohens_d(g1, g2)
+    p_bonf       = min(p * n_comb, 1.0)
+    print(f"\n  {description}")
+    print(f"    Delta = {g1.mean()-g2.mean():+.4f}  "
+          f"Welch's t({df_val:.1f}) = {t:.3f}  "
+          f"p = {p:.4f} {sig_marker(p)}  ->  "
+          f"p_bonf = {p_bonf:.4f} {sig_marker(p_bonf)}  d = {d:.3f}")
+    combined_rows.append(dict(
+        comparison=label, description=description,
+        mean_a=g1.mean(), mean_b=g2.mean(), delta=g1.mean()-g2.mean(),
+        t=t, df=df_val, p=p, p_bonf=p_bonf,
+        sig=sig_marker(p), sig_bonf=sig_marker(p_bonf), d=d
+    ))
+
+combined_df = pd.DataFrame(combined_rows)
+combined_df.to_csv(
+    f"{output_dir}/combined_advantage_{MODEL_SLUG}.csv", index=False)
+print(f"\nSaved combined advantage table")
+```
+
+### Visualisation
+
+```{python vis-rq2, echo=FALSE}
+fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+
+# Panel A: clip vs context
+ax = axes[0]
+clip_ci = stats.t.interval(0.95, len(clip_sims)-1,
+                            loc=clip_sims.mean(), scale=stats.sem(clip_sims))
+ctx_ci  = stats.t.interval(0.95, len(ctx_sims)-1,
+                            loc=ctx_sims.mean(),  scale=stats.sem(ctx_sims))
+means_rq2 = [clip_sims.mean(), ctx_sims.mean()]
+errs_rq2  = [(clip_ci[1]-clip_ci[0])/2, (ctx_ci[1]-ctx_ci[0])/2]
+groups    = ["Clip-Driven\n(Same Clip, Diff Ctx)", "Context-Driven\n(Diff Clip, Same Ctx)"]
+cols_rq2  = ["#3498db", "#e74c3c"]
+
+ax.bar(range(2), means_rq2, color=cols_rq2, edgecolor="black",
+       linewidth=2, alpha=0.85, width=0.55)
+ax.errorbar(range(2), means_rq2, yerr=errs_rq2, fmt="none",
+            ecolor="black", capsize=8, capthick=2, linewidth=2)
+ax.set_xticks(range(2))
+ax.set_xticklabels(groups, fontsize=10)
+ax.set_ylabel("Mean Cosine Similarity", fontsize=11)
+ax.set_title("A. Clip vs Context  (RQ2a)\n(95% CI error bars)",
+             fontsize=12, fontweight="bold")
+mid_y = (means_rq2[0] + means_rq2[1]) / 2 + 0.005
+ax.annotate("", xy=(0, mid_y), xytext=(1, mid_y),
+            arrowprops=dict(arrowstyle="<->", lw=2, color="black"))
+effect_text = (f"d = {rq2_primary['d']:.3f}  {rq2_primary['sig']}\n"
+               f"Δ = {rq2_primary['diff']:+.4f}")
+ax.text(0.5, mid_y + 0.008, effect_text, ha="center", fontsize=10,
+        fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="lightyellow",
+                  edgecolor="black", alpha=0.9))
+ax.set_ylim([0, max(means_rq2) * 1.35])
+ax.grid(axis="y", alpha=0.3, linestyle="--")
+
+# Panel B: three-condition combined advantage bar
+ax2 = axes[1]
+three_conds = [
+    (sc_dc, "Clip-only\n(Sclip_Dcontext)",    "#3498db"),
+    (dc_sc, "Context-only\n(Dclip_Scontext)", "#e74c3c"),
+    (sc_sc, "Combined\n(Sclip_Scontext)",     "#9b59b6"),
+]
+m3 = [g.mean() for g, _, _ in three_conds]
+e3 = [(stats.t.interval(0.95, len(g)-1, loc=g.mean(), scale=stats.sem(g))[1] -
+       stats.t.interval(0.95, len(g)-1, loc=g.mean(), scale=stats.sem(g))[0]) / 2
+      for g, _, _ in three_conds]
+
+ax2.bar(range(3), m3, color=[c for _, _, c in three_conds],
+        edgecolor="black", alpha=0.85)
+ax2.errorbar(range(3), m3, yerr=e3, fmt="none",
+             ecolor="black", capsize=6, linewidth=2)
+ax2.set_xticks(range(3))
+ax2.set_xticklabels([l for _, l, _ in three_conds], fontsize=10)
+ax2.set_ylabel("Mean Cosine Similarity", fontsize=11)
+ax2.set_title("B. Combined Alignment Advantage  (RQ2b)\n(95% CI error bars)",
+              fontsize=12, fontweight="bold")
+ax2.grid(axis="y", alpha=0.3, linestyle="--")
+
+# Annotate Bonferroni-corrected sig markers from combined_df
+if len(combined_df) > 0:
+    y_top = max(m3) + max(e3) + 0.01
+    # Combined vs clip-only: bars 2 and 0
+    ax2.plot([0, 2], [y_top, y_top], "k-", linewidth=1.2)
+    ax2.text(1, y_top + 0.003,
+             combined_df.loc[combined_df["description"].str.contains("Clip"), "sig_bonf"].values[0],
+             ha="center", fontsize=10, fontweight="bold")
+    # Combined vs context-only: bars 2 and 1
+    y_top2 = y_top + 0.025
+    ax2.plot([1, 2], [y_top2, y_top2], "k-", linewidth=1.2)
+    ax2.text(1.5, y_top2 + 0.003,
+             combined_df.loc[combined_df["description"].str.contains("Context"), "sig_bonf"].values[0],
+             ha="center", fontsize=10, fontweight="bold")
+    ax2.set_ylim([0, y_top2 + 0.05])
+
+plt.suptitle(f"RQ2: Does Music or Context Drive Greater Convergence?  [{MODEL_SLUG} — individual]",
+             fontsize=14, fontweight="bold")
+plt.tight_layout()
+plt.savefig(f"{output_dir}/RQ2_clip_vs_context_{MODEL_SLUG}.png",
+            dpi=300, bbox_inches="tight")
+plt.show()
+```
+
+---
+
+## RQ3 — Does Genre Moderate the Context Effect?
+
+**Logic**: Two complementary tests. *Framing susceptibility*: per genre, how much
+does sharing a context label raise similarity above the dissimilarity floor?
+*Within-genre clip vs context dominance*: within each genre, does clip or context
+drive more convergence?
+
+### Framing Susceptibility by Genre
+
+```{python rq3-susceptibility, echo=FALSE}
+print("RQ3 — GENRE FRAMING SUSCEPTIBILITY")
+print("=" * 70)
+print("Framing gain = Dclip_Scontext M  −  Dclip_Dcontext_Dgenre M  (per genre)")
+print("-" * 70)
+
+susceptibility_rows = []
+for genre in genre_list:
+    ctx_sims_g = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
+    if len(ctx_sims_g) == 0:
+        ctx_sims_g = sim_df.loc[
+            (sim_df["condition"] == "Dclip_Scontext") &
+            ((sim_df["genre_i"] == genre) | (sim_df["genre_j"] == genre)), "similarity"]
+    baseline_g = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Dcontext_Dgenre") &
+        (sim_df["genre_i"] == genre), "similarity"]
+
+    if len(ctx_sims_g) > 1 and len(baseline_g) > 1:
+        framing_gain = ctx_sims_g.mean() - baseline_g.mean()
+        t, p, df_val = welch_t(ctx_sims_g, baseline_g)
+        d            = cohens_d(ctx_sims_g, baseline_g)
+        susceptibility_rows.append(dict(
+            genre=genre,
+            context_driven_mean=ctx_sims_g.mean(),
+            baseline_mean=baseline_g.mean(),
+            framing_gain=framing_gain,
+            t=t, df=df_val, p=p, d=d,
+            n_ctx=len(ctx_sims_g), n_base=len(baseline_g)
+        ))
+        print(f"  {genre.upper():14s}  Ctx M={ctx_sims_g.mean():.4f}  "
+              f"Base M={baseline_g.mean():.4f}  "
+              f"Gain={framing_gain:+.4f}  d={d:.3f}  p={p:.4f}")
+
+susceptibility_df = pd.DataFrame(susceptibility_rows)
+if len(susceptibility_df) > 0:
+    n_sus = len(susceptibility_df)
+    susceptibility_df["p_bonf"]   = (susceptibility_df["p"] * n_sus).clip(upper=1.0)
+    susceptibility_df["sig"]      = susceptibility_df["p"].apply(sig_marker)
+    susceptibility_df["sig_bonf"] = susceptibility_df["p_bonf"].apply(sig_marker)
+    susceptibility_df = susceptibility_df.sort_values("framing_gain", ascending=False)
+    print(f"\nGenres ranked by framing susceptibility (highest to lowest):")
+    for _, r in susceptibility_df.iterrows():
+        print(f"  {r['genre'].upper():14s}  Gain={r['framing_gain']:+.4f}  "
+              f"d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
+    susceptibility_df.to_csv(
+        f"{output_dir}/genre_framing_susceptibility_{MODEL_SLUG}.csv", index=False)
+    print(f"\nSaved genre framing susceptibility table")
+```
+
+### Within-Genre Clip vs Context Dominance
+
+```{python rq3-genre-moderator, echo=FALSE}
+print("RQ3 — WITHIN-GENRE CLIP vs CONTEXT DOMINANCE")
+print("=" * 70)
+print("Clip-driven:    Sclip_Dcontext  (same clip, diff context, same genre)")
+print("Context-driven: Dclip_Scontext  (diff clip, same context, same genre)")
+print("-" * 70)
+
+mod_rows = []
+for genre in genre_list:
+    clip_sims_g = sim_df.loc[
+        (sim_df["condition"] == "Sclip_Dcontext") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
+    ctx_sims_g = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
+    if len(clip_sims_g) > 1 and len(ctx_sims_g) > 1:
+        t, p, df_val = welch_t(clip_sims_g, ctx_sims_g)
+        d            = cohens_d(clip_sims_g, ctx_sims_g)
+        dominant     = "CLIP" if clip_sims_g.mean() > ctx_sims_g.mean() else "CONTEXT"
+        mod_rows.append(dict(
+            genre=genre,
+            clip_mean=clip_sims_g.mean(), clip_sd=clip_sims_g.std(),
+            context_mean=ctx_sims_g.mean(), context_sd=ctx_sims_g.std(),
+            diff=clip_sims_g.mean()-ctx_sims_g.mean(),
+            dominant=dominant,
+            t=t, df=df_val, p=p, d=d,
+            n_clip=len(clip_sims_g), n_context=len(ctx_sims_g)
+        ))
+        print(f"  {genre.upper():14s}  Clip M={clip_sims_g.mean():.4f}  "
+              f"Ctx M={ctx_sims_g.mean():.4f}  "
+              f"-> {dominant:7s} dominant  d={d:.3f}  p={p:.4f}")
+
+genre_mod_df = pd.DataFrame(mod_rows)
+if len(genre_mod_df) > 0:
+    n_mod = len(genre_mod_df)
+    genre_mod_df["p_bonf"]   = (genre_mod_df["p"] * n_mod).clip(upper=1.0)
+    genre_mod_df["sig"]      = genre_mod_df["p"].apply(sig_marker)
+    genre_mod_df["sig_bonf"] = genre_mod_df["p_bonf"].apply(sig_marker)
+    genre_mod_df.to_csv(
+        f"{output_dir}/genre_clip_vs_context_moderator_{MODEL_SLUG}.csv", index=False)
+    print(f"\nSaved within-genre clip vs context moderator table")
+```
+
+### Visualisation
+
+```{python vis-rq3, echo=FALSE}
+if len(susceptibility_df) > 0 and len(genre_mod_df) > 0:
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+    ax = axes[0]
+    s  = susceptibility_df.sort_values("framing_gain", ascending=True)
+    colors = ["#e74c3c" if g > 0 else "#95a5a6" for g in s["framing_gain"]]
+    ax.barh(range(len(s)), s["framing_gain"], color=colors,
+            edgecolor="black", alpha=0.85)
+    ax.axvline(0, color="black", linewidth=1.5)
+    ax.set_yticks(range(len(s)))
+    ax.set_yticklabels(s["genre"].str.upper(), fontsize=11)
+    ax.set_xlabel("Framing Gain\n(Dclip_Scontext − Dclip_Dcontext_Dgenre)", fontsize=10)
+    ax.set_title("A. Genre Framing Susceptibility\n(Higher = More Context-Sensitive)",
+                 fontsize=13, fontweight="bold")
+    for i, (_, row) in enumerate(s.iterrows()):
+        x_off = 0.002 if row["framing_gain"] >= 0 else -0.002
+        ha    = "left"  if row["framing_gain"] >= 0 else "right"
+        ax.text(row["framing_gain"] + x_off, i, row["sig_bonf"],
+                ha=ha, va="center", fontsize=10, fontweight="bold")
+    ax.grid(axis="x", alpha=0.3)
+
+    ax2 = axes[1]
+    s2  = genre_mod_df.sort_values("diff", ascending=True)
+    colors2 = ["#3498db" if d > 0 else "#e74c3c" for d in s2["diff"]]
+    ax2.barh(range(len(s2)), s2["diff"], color=colors2,
+             edgecolor="black", alpha=0.85)
+    ax2.axvline(0,     color="black", linewidth=1.5)
+    ax2.axvline( 0.05, color="gray",  linestyle="--", alpha=0.4)
+    ax2.axvline(-0.05, color="gray",  linestyle="--", alpha=0.4)
+    ax2.set_yticks(range(len(s2)))
+    ax2.set_yticklabels(s2["genre"].str.upper(), fontsize=11)
+    ax2.set_xlabel("Clip Mean − Context Mean\n(+ve = Clip dominant; −ve = Context dominant)",
+                   fontsize=10)
+    ax2.set_title("B. Clip vs Context Dominance by Genre\n(Sclip_Dcontext vs Dclip_Scontext)",
+                  fontsize=13, fontweight="bold")
+    for i, (_, row) in enumerate(s2.iterrows()):
+        x_off = 0.003 if row["diff"] >= 0 else -0.003
+        ha    = "left"  if row["diff"] >= 0 else "right"
+        ax2.text(row["diff"] + x_off, i, row["sig_bonf"],
+                 ha=ha, va="center", fontsize=10, fontweight="bold")
+    fig.legend(
+        handles=[Patch(facecolor="#3498db", label="Clip dominant"),
+                 Patch(facecolor="#e74c3c", label="Context dominant")],
+        loc="lower center", ncol=2, fontsize=10, bbox_to_anchor=(0.75, -0.06)
+    )
+    ax2.grid(axis="x", alpha=0.3)
+
+    plt.suptitle(f"RQ3: Does Genre Moderate the Context Effect?  [{MODEL_SLUG} — individual]",
+                 fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(f"{output_dir}/RQ3_genre_moderation_{MODEL_SLUG}.png",
+                dpi=300, bbox_inches="tight")
+    plt.show()
+    print("Saved: RQ3 genre moderation plot")
+```
+
+---
+
+## Summary
+
+```{python summary, echo=FALSE}
+print(f"SUMMARY OF FINDINGS  [{MODEL_SLUG} — individual level]")
+print("=" * 70)
+
+print(f"\nRQ1 — Context Effect (Dclip_Scontext vs Dclip_Dcontext_Dgenre):")
+print(f"  Context-driven M={rq1_context['mean_ctx']:.4f}  |  "
+      f"Baseline M={rq1_context['mean_base']:.4f}")
+print(f"  Delta={rq1_context['delta']:+.4f}  "
+      f"t({rq1_context['df']:.1f})={rq1_context['t']:.3f}  "
+      f"p={rq1_context['p']:.4f}  {rq1_context['sig']}  "
+      f"d={rq1_context['d']:.3f}")
+
+print(f"\nRQ2a — Clip vs Context (Sclip_Dcontext vs Dclip_Scontext):")
+print(f"  Clip M={rq2_primary['mean_clip']:.4f}  |  Ctx M={rq2_primary['mean_ctx']:.4f}")
+dominant = "CLIP" if rq2_primary["diff"] > 0 else "CONTEXT"
+print(f"  Delta={rq2_primary['diff']:+.4f}  {dominant} dominant  "
+      f"d={rq2_primary['d']:.3f}  {rq2_primary['sig']}")
+
+print(f"\nRQ2b — Combined Advantage (Sclip_Scontext vs single-factor conditions):")
+for _, r in combined_df.iterrows():
+    print(f"  {r['description']}")
+    print(f"    Delta={r['delta']:+.4f}  d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
+
+if len(susceptibility_df) > 0:
+    print(f"\nRQ3 — Genre Framing Susceptibility (ranked highest to lowest):")
+    for _, r in susceptibility_df.iterrows():
+        print(f"  {r['genre'].upper():14s}  Gain={r['framing_gain']:+.4f}  "
+              f"d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
+
+if len(genre_mod_df) > 0:
+    print(f"\nRQ3 — Within-Genre Clip vs Context Dominance:")
+    for _, r in genre_mod_df.iterrows():
+        print(f"  {r['genre'].upper():14s}  -> {r['dominant']:7s} dominant  "
+              f"d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
+```
+
+---
+
+## Exploratory Analyses
+
+> The analyses below do not map directly onto the three pre-specified research
+> questions. They are retained as descriptive and methodological supplements that
+> may be useful for characterising the data or for future exploratory work.
+
+### Pairwise Context and Genre Comparisons
+
+Tests whether specific context labels or genres differ from each other in how much
+convergence they produce. Descriptive characterisation only.
+
+```{python exploratory-pairwise, echo=FALSE}
+print("PAIRWISE CONTEXT COMPARISONS  (Bonferroni corrected)")
+print("-" * 70)
+
+ctx_pairs = []
+for c1, c2 in combinations(ctx_list, 2):
+    g1 = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["context_i"] == c1) & (sim_df["context_j"] == c1), "similarity"]
+    g2 = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["context_i"] == c2) & (sim_df["context_j"] == c2), "similarity"]
+    if len(g1) > 1 and len(g2) > 1:
+        t, p, df_val = welch_t(g1, g2)
+        d = cohens_d(g1, g2)
+        ctx_pairs.append(dict(context1=c1, context2=c2,
+                               mean1=g1.mean(), mean2=g2.mean(),
+                               diff=g1.mean()-g2.mean(),
+                               t=t, df=df_val, p=p, d=d,
+                               n1=len(g1), n2=len(g2)))
+
+context_pairs_df = pd.DataFrame(ctx_pairs)
+if len(context_pairs_df) > 0:
+    context_pairs_df["p_bonf"]   = (context_pairs_df["p"] * len(context_pairs_df)).clip(upper=1.0)
+    context_pairs_df["sig"]      = context_pairs_df["p"].apply(sig_marker)
+    context_pairs_df["sig_bonf"] = context_pairs_df["p_bonf"].apply(sig_marker)
+    context_pairs_df = context_pairs_df.sort_values("d", key=abs, ascending=False)
+    print(context_pairs_df[["context1","context2","mean1","mean2","d",
+                             "p","p_bonf","sig_bonf"]].to_string(index=False))
+    context_pairs_df.to_csv(
+        f"{output_dir}/context_pairwise_comparisons_{MODEL_SLUG}.csv", index=False)
+
+print("\n\nPAIRWISE GENRE COMPARISONS  (Bonferroni corrected)")
+print("-" * 70)
+
+genre_pairs = []
+for g1_lbl, g2_lbl in combinations(genre_list, 2):
+    s1 = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Dcontext_Sgenre") &
+        (sim_df["genre_i"] == g1_lbl) & (sim_df["genre_j"] == g1_lbl), "similarity"]
+    s2 = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Dcontext_Sgenre") &
+        (sim_df["genre_i"] == g2_lbl) & (sim_df["genre_j"] == g2_lbl), "similarity"]
+    if len(s1) > 1 and len(s2) > 1:
+        t, p, df_val = welch_t(s1, s2)
+        d = cohens_d(s1, s2)
+        genre_pairs.append(dict(genre1=g1_lbl, genre2=g2_lbl,
+                                 mean1=s1.mean(), mean2=s2.mean(),
+                                 diff=s1.mean()-s2.mean(),
+                                 t=t, df=df_val, p=p, d=d,
+                                 n1=len(s1), n2=len(s2)))
+
+genre_pairs_df = pd.DataFrame(genre_pairs)
+if len(genre_pairs_df) > 0:
+    genre_pairs_df["p_bonf"]   = (genre_pairs_df["p"] * len(genre_pairs_df)).clip(upper=1.0)
+    genre_pairs_df["sig"]      = genre_pairs_df["p"].apply(sig_marker)
+    genre_pairs_df["sig_bonf"] = genre_pairs_df["p_bonf"].apply(sig_marker)
+    genre_pairs_df = genre_pairs_df.sort_values("d", key=abs, ascending=False)
+    print(genre_pairs_df[["genre1","genre2","mean1","mean2","d",
+                           "p","p_bonf","sig_bonf"]].to_string(index=False))
+    genre_pairs_df.to_csv(
+        f"{output_dir}/genre_pairwise_comparisons_{MODEL_SLUG}.csv", index=False)
+```
+
+### Similarity Matrices
+
+Full within/between similarity for context and genre.
+
+```{python exploratory-similarity-matrices, echo=FALSE}
+ctx_within_exp = []
+for ctx in ctx_list:
+    sims = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["context_i"] == ctx) & (sim_df["context_j"] == ctx), "similarity"]
+    if len(sims) > 0:
+        ctx_within_exp.append(dict(context=ctx, mean=sims.mean()))
+context_within_df = pd.DataFrame(ctx_within_exp)
+
+genre_within_exp = []
+for genre in genre_list:
+    sims = sim_df.loc[
+        (sim_df["condition"] == "Dclip_Dcontext_Sgenre") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
+    if len(sims) > 0:
+        genre_within_exp.append(dict(genre=genre, mean=sims.mean()))
+genre_within_df = pd.DataFrame(genre_within_exp)
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+for ax, within_df, fkey, meta_col, panel in [
+    (axes[0], context_within_df, "context", "context_word", "A. Context Similarity Matrix"),
+    (axes[1], genre_within_df,   "genre",   "clip_genre",   "B. Genre Similarity Matrix"),
+]:
+    labels = sorted(df[meta_col].unique())
+    n_lbl  = len(labels)
+    mat    = np.full((n_lbl, n_lbl), np.nan)
+    for i, l1 in enumerate(labels):
+        for j, l2 in enumerate(labels):
+            if i == j:
+                val = within_df.loc[within_df[fkey] == l1, "mean"].values
+                mat[i, j] = val[0] if len(val) > 0 else np.nan
+            else:
+                mask = (
+                    ((sim_df[f"{fkey}_i"] == l1) & (sim_df[f"{fkey}_j"] == l2)) |
+                    ((sim_df[f"{fkey}_i"] == l2) & (sim_df[f"{fkey}_j"] == l1))
+                )
+                sims = sim_df.loc[mask, "similarity"]
+                mat[i, j] = sims.mean() if len(sims) > 0 else np.nan
+    if not np.all(np.isnan(mat)):
+        sns.heatmap(mat, annot=True, fmt=".3f", cmap="YlOrRd",
+                    xticklabels=labels, yticklabels=labels,
+                    cbar_kws={"label": "Mean Similarity"},
+                    mask=np.isnan(mat),
+                    linewidths=0.5, linecolor="gray", ax=ax)
+    ax.set_title(f"{panel}\n(Diagonal = Within-{fkey.capitalize()})",
+                 fontsize=13, fontweight="bold")
+
+plt.suptitle(f"Similarity Matrices: Context and Genre  [{MODEL_SLUG} — individual]",
+             fontsize=15, fontweight="bold")
+plt.tight_layout()
+plt.savefig(f"{output_dir}/similarity_matrices_{MODEL_SLUG}.png",
+            dpi=300, bbox_inches="tight")
+plt.show()
+```
+
+### Individual-Level t-SNE
+
+t-SNE of the sentence embedding space coloured by genre and context. At the
+individual level this also reveals whether within-cell responses (same participant
+condition) cluster together.
+
+```{python exploratory-tsne, echo=FALSE}
+n_svd = min(50, embeddings.shape[1] - 1)
+svd   = TruncatedSVD(n_components=n_svd, random_state=42)
+X_svd = svd.fit_transform(embeddings)
+print(f"SVD explained variance: {svd.explained_variance_ratio_.sum():.3f}  "
+      f"({n_svd} components)")
+
+try:
+    perp = min(30, len(df) // 4)   # perplexity must be < N/4 for small datasets
+    tsne = TSNE(n_components=2, perplexity=perp, max_iter=1000,
+                random_state=42, init="pca", learning_rate="auto")
+except TypeError:
+    tsne = TSNE(n_components=2, perplexity=perp, n_iter=1000,
+                random_state=42, init="pca", learning_rate="auto")
+
+X_2d = tsne.fit_transform(X_svd)
+
+tsne_df = df[["clip_name", "context_word", "clip_genre"]].copy().reset_index(drop=True)
+tsne_df["TSNE1"] = X_2d[:, 0]
+tsne_df["TSNE2"] = X_2d[:, 1]
+tsne_df.to_csv(f"{output_dir}/tsne_coords_{MODEL_SLUG}.csv", index=False)
+
+fig, ax = plt.subplots(figsize=(10, 8))
+sns.scatterplot(data=tsne_df, x="TSNE1", y="TSNE2",
+                hue="clip_genre", style="context_word",
+                palette="tab10", s=60, alpha=0.7, ax=ax)
+ax.set_title(f"t-SNE: Individual MIMC Embeddings  [{MODEL_SLUG}]",
+             fontsize=13, fontweight="bold")
+ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.)
+plt.tight_layout()
+plt.savefig(f"{output_dir}/tsne_{MODEL_SLUG}.png", dpi=300, bbox_inches="tight")
+plt.show()
+print("Saved: individual t-SNE plot")
+```
+
+```{r env}
+install.packages("renv")
+renv::init()
+renv::snapshot()
+```

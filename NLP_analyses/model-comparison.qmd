@@ -1,0 +1,1043 @@
+---
+title: "Framed Listening: NLP Model Comparison — Top & Bottom Semantic Similarity Pairs"
+author: "Hazel A. van der Walle (PhD student, Music, Durham University)"
+date: "23 April 2026"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+    self-contained: true
+---
+
+All datasets generated and used for this study are openly available on GitHub:
+<https://github.com/HazelvdW/context-framed-listening>.
+
+This document runs all six NLP models on **both** data levels — aggregated combMIMC
+documents (Group A) and individual MIMC responses (Group B) — to provide a fully
+comparable cross-model, cross-level view for model selection decisions.
+
+**Why both levels for all models?**
+
+Running every model on both levels reveals two things that a partial comparison
+cannot: (1) whether a model's behaviour changes substantially with input length
+and aggregation, and (2) whether the performance advantages of sentence-embedding
+models over TF-IDF/Word2Vec are consistent across scales. TF-IDF and Word2Vec are
+expected to perform poorly at the individual level due to sparse lexical overlap. 
+Seeing that failure empirically, alongside the scores each model assigns to the
+same conceptually similar pairs, is the evidence needed to justify model choices.
+
+> **Cross-level similarity scores are not directly comparable** — the units differ
+> (64 documents vs many individual responses). Cross-model comparisons are run
+> within each group separately. The distributions section gives the best high-level
+> view of how each model behaves across both levels.
+
+**All models × both levels:**
+
+| | TF-IDF | W2V `lvl2a` | W2V `lvl1a` | BERT | MiniLM | mpnet | para-mpnet |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **A — combMIMC** | A1 | A2 | A3 | A4 | A5 | A6 | A7 |
+| **B — individual** | B1 | B2 | B3 | B4 | B5 | B6 | B7 |
+
+---
+
+## Setup
+
+```{r setup-r, echo=FALSE}
+library(reticulate)
+
+# Uncomment to install on first run:
+ reticulate::py_install(c(
+   "pandas", "numpy", "scikit-learn", "scipy",
+   "matplotlib", "seaborn", "sentence-transformers",
+   "torch", "gensim"
+ ), pip = TRUE)
+```
+
+```{python setup, echo=FALSE}
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise         import cosine_similarity
+from sentence_transformers            import SentenceTransformer, models as st_models
+import gensim.downloader as api
+from gensim.models                    import KeyedVectors
+
+base_path  = (
+    "/Users/hazelaileenvanderwalle/Library/CloudStorage/"
+    "OneDrive-Personal/work/study/PhD/_PROJECT/"
+    "_framedListening_NLP/context-framed-listening"
+)
+output_dir = f"{base_path}/NLP_outputs/model_comparison"
+os.makedirs(output_dir, exist_ok=True)
+
+TOP_N     = 10
+MAX_CHARS = 300
+MIN_WORDS = 5     # pairs where either original text has fewer words than this are excluded
+
+print(f"Output directory: {output_dir}")
+print(f"Showing top/bottom {TOP_N} pairs per model")
+```
+
+```{python version-check, echo=FALSE}
+# ── Environment version check ──────────────────────────────────────────────────
+import importlib, sys
+from packaging.version import Version
+
+REQUIREMENTS = {
+    "numpy":                "1.26",
+    "pandas":               "2.1",
+    "sklearn":              "1.3",    # scikit-learn
+    "matplotlib":           "3.8",
+    "seaborn":              "0.13",
+    "sentence_transformers": "2.7",   # sentence-transformers
+    "torch":                "2.1",
+    "gensim":               "4.3",
+}
+
+print(f"Python {sys.version}")
+print("-" * 52)
+all_ok = True
+for pkg, min_ver in REQUIREMENTS.items():
+    try:
+        mod = importlib.import_module(pkg)
+        ver = getattr(mod, "__version__", "unknown")
+        ok  = Version(ver) >= Version(min_ver) if ver != "unknown" else True
+        status = "OK" if ok else f"WARNING — expected >={min_ver}"
+        if not ok:
+            all_ok = False
+        print(f"  {pkg:<26} {ver:<12} {status}")
+    except ImportError:
+        print(f"  {pkg:<26} NOT INSTALLED  ERROR")
+        all_ok = False
+if all_ok:
+    print("\nAll package versions OK.")
+else:
+    print("\nOne or more issues — run: pip install -r requirements.txt")
+```
+
+---
+
+## Load Data
+
+```{python load-data, echo=FALSE}
+# ── Group A: aggregated combMIMC documents (N = 64) ───────────────────────────
+df_comblvl2a = pd.read_csv(f"{base_path}/NLP_outputs/combMIMC_lvl2a.csv")
+df_comblvl1a = pd.read_csv(f"{base_path}/NLP_outputs/combMIMC_lvl1a.csv")
+
+if "text_original" not in df_comblvl2a.columns or "text_original" not in df_comblvl1a.columns:
+    raise ValueError(
+        "combMIMC CSV files are missing 'text_original'.\n"
+        "Re-run NLP-text-prep.qmd to regenerate them."
+    )
+orig_col_comb = "text_original"
+
+print(f"combMIMC_lvl2a: {len(df_comblvl2a)} documents  |  columns: {df_comblvl2a.columns.tolist()}")
+print(f"combMIMC_lvl1a: {len(df_comblvl1a)} documents  |  columns: {df_comblvl1a.columns.tolist()}")
+
+# ── Group B: individual MIMC responses ────────────────────────────────────────
+df_indiv = pd.read_csv(f"{base_path}/NLP_outputs/dataMIMC_preprocessed.csv")
+
+orig_col_indiv = next(
+    (c for c in ["descr_THOUGHT.text_spellchecked", "descr_THOUGHT.text"]
+     if c in df_indiv.columns), None)
+if orig_col_indiv is None:
+    raise ValueError("Cannot find original text column in dataMIMC_preprocessed.csv.")
+
+df_indiv = df_indiv.dropna(
+    subset=["textMIMC_lvl1a", "textMIMC_lvl2a", orig_col_indiv]
+).reset_index(drop=True)
+
+print(f"\ndataMIMC_preprocessed: {len(df_indiv)} individual responses")
+print(f"  Original text column: '{orig_col_indiv}'")
+```
+
+---
+
+## Helper Functions
+
+```{python helpers, echo=FALSE}
+def truncate(text, max_chars=MAX_CHARS):
+    text = str(text)
+    return text if len(text) <= max_chars else text[:max_chars] + "…"
+
+
+def build_pairs_df(sim_matrix, source_df, model_col, original_col):
+    """Build a long-format pairs DataFrame, excluding:
+      - pairs where both original texts are identical
+      - pairs where either original text is shorter than MIN_WORDS words
+      - same-participant same-cell pairs (if PROLIFIC_PID is present)
+    """
+    genre_col_local = next(
+        (c for c in ["genre_code", "clip_genre"] if c in source_df.columns), None)
+    pid_col   = "PROLIFIC_PID" if "PROLIFIC_PID" in source_df.columns else None
+    orig_vals = source_df[original_col].astype(str).str.strip().values
+    word_counts = np.array([len(v.split()) for v in orig_vals])
+    n = sim_matrix.shape[0]
+    n_skip_id, n_skip_pid, n_skip_short = 0, 0, 0
+    rows = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if orig_vals[i] == orig_vals[j]:
+                n_skip_id += 1
+                continue
+            if word_counts[i] < MIN_WORDS or word_counts[j] < MIN_WORDS:
+                n_skip_short += 1
+                continue
+            if pid_col and (
+                source_df[pid_col].iloc[i] == source_df[pid_col].iloc[j] and
+                source_df["clip_name"].iloc[i]    == source_df["clip_name"].iloc[j] and
+                source_df["context_word"].iloc[i] == source_df["context_word"].iloc[j]
+            ):
+                n_skip_pid += 1
+                continue
+            row = dict(
+                idx_a=i, idx_b=j,
+                similarity=float(sim_matrix[i, j]),
+                text_a_model=truncate(source_df[model_col].iloc[i]),
+                text_b_model=truncate(source_df[model_col].iloc[j]),
+                text_a_orig=truncate(source_df[original_col].iloc[i]),
+                text_b_orig=truncate(source_df[original_col].iloc[j]),
+                clip_a=source_df["clip_name"].iloc[i],
+                clip_b=source_df["clip_name"].iloc[j],
+                context_a=source_df["context_word"].iloc[i],
+                context_b=source_df["context_word"].iloc[j],
+                same_clip=(source_df["clip_name"].iloc[i] == source_df["clip_name"].iloc[j]),
+                same_context=(source_df["context_word"].iloc[i] == source_df["context_word"].iloc[j]),
+            )
+            if genre_col_local:
+                row["genre_a"] = source_df[genre_col_local].iloc[i]
+                row["genre_b"] = source_df[genre_col_local].iloc[j]
+            rows.append(row)
+    pairs = pd.DataFrame(rows).sort_values("similarity", ascending=False).reset_index(drop=True)
+    print(f"  Pairs: {len(pairs):,}  |  skipped — identical: {n_skip_id:,}  |  "
+          f"short (<{MIN_WORDS} words): {n_skip_short:,}  |  "
+          f"same person/cell: {n_skip_pid:,}")
+    return pairs
+
+
+def top_bottom(pairs_df, n=TOP_N):
+    return pairs_df.head(n), pairs_df.tail(n).sort_values("similarity")
+
+
+def print_pairs(pairs_df):
+    for rank, (_, row) in enumerate(pairs_df.iterrows(), start=1):
+        print(f"\n  [{rank}]  Sim={row['similarity']:.4f}  |  "
+              f"{'✓ same clip' if row['same_clip'] else '✗ diff clip'}  "
+              f"{'✓ same context' if row['same_context'] else '✗ diff context'}")
+        print(f"       {row['clip_a']} / {row['context_a']}  vs  "
+              f"{row['clip_b']} / {row['context_b']}")
+        print(f"  ── Original A: {row['text_a_orig']}")
+        print(f"  ── Original B: {row['text_b_orig']}")
+        if row["text_a_model"] != row["text_a_orig"]:
+            print(f"     Model A:    {row['text_a_model']}")
+            print(f"     Model B:    {row['text_b_model']}")
+
+
+def plot_pairs(top_df, bot_df, model_name, slug):
+    fig, axes = plt.subplots(1, 2, figsize=(20, max(6, TOP_N * 0.9)))
+    for ax, data, title, color in [
+        (axes[0], top_df, f"Top {TOP_N} Most Similar",    "#27ae60"),
+        (axes[1], bot_df, f"Bottom {TOP_N} Least Similar", "#e74c3c"),
+    ]:
+        labels = [f"A: {r['text_a_orig'][:60]}…\nB: {r['text_b_orig'][:60]}…"
+                  for _, r in data.iterrows()]
+        sims = data["similarity"].values
+        ax.barh(range(len(sims)), sims, color=color, alpha=0.8,
+                edgecolor="black", linewidth=0.6)
+        ax.set_yticks(range(len(sims)))
+        ax.set_yticklabels(labels, fontsize=7.5)
+        ax.set_xlabel("Cosine Similarity", fontsize=10)
+        ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.set_xlim([0, 1])
+        ax.grid(axis="x", alpha=0.3)
+        for i, sim in enumerate(sims):
+            ax.text(sim + 0.01, i, f"{sim:.3f}", va="center", fontsize=8)
+    plt.suptitle(model_name, fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    path = f"{output_dir}/pairs_{slug}.png"
+    plt.savefig(path, dpi=200, bbox_inches="tight")
+    plt.show()
+    print(f"Saved: {path}")
+
+
+def save_pairs(top_df, bot_df, slug):
+    top_df.assign(rank_type="top").to_csv(
+        f"{output_dir}/pairs_top_{slug}.csv", index=False)
+    bot_df.assign(rank_type="bottom").to_csv(
+        f"{output_dir}/pairs_bottom_{slug}.csv", index=False)
+
+
+def pair_set(df_p):
+    return set(zip(df_p["idx_a"].astype(int), df_p["idx_b"].astype(int)))
+
+
+def jaccard(a, b):
+    return len(a & b) / len(a | b) if (a or b) else 1.0
+
+
+def run_cross_model(model_results, sim_lookup, group_label, ref_key,
+                    dist_title, n_cols=4):
+    """Run all three cross-model visualisations for one group."""
+    names = list(model_results.keys())
+
+    # 1. Jaccard overlap heatmaps (top and bottom)
+    for which, idx in [("Top", 0), ("Bottom", 1)]:
+        mat = np.zeros((len(names), len(names)))
+        for i, m1 in enumerate(names):
+            for j, m2 in enumerate(names):
+                mat[i, j] = jaccard(pair_set(model_results[m1][idx]),
+                                     pair_set(model_results[m2][idx]))
+        n = len(names)
+        fig, ax = plt.subplots(figsize=(max(7, n * 1.1), max(6, n)))
+        sns.heatmap(mat, annot=True, fmt=".2f", cmap="YlGn",
+                    xticklabels=names, yticklabels=names,
+                    vmin=0, vmax=1, linewidths=0.5, linecolor="gray", ax=ax)
+        ax.set_title(f"Group {group_label} — Jaccard Overlap ({which} {TOP_N} pairs)\n"
+                     "1.0 = identical pair sets, 0.0 = no overlap",
+                     fontsize=12, fontweight="bold")
+        plt.xticks(rotation=30, ha="right", fontsize=9)
+        plt.tight_layout()
+        path = f"{output_dir}/group{group_label}_jaccard_{which.lower()}.png"
+        plt.savefig(path, dpi=200, bbox_inches="tight")
+        plt.show()
+        print(f"Saved: {path}")
+
+    # 2. Score distributions
+    all_sims = {k: sm[np.triu_indices_from(sm, k=1)] for k, sm in sim_lookup.items()}
+    n_rows   = (len(names) + n_cols - 1) // n_cols
+    colors   = plt.cm.tab10(np.linspace(0, 0.9, len(names)))
+    fig, axes = plt.subplots(n_rows, n_cols,
+                              figsize=(n_cols * 5.5, n_rows * 4.5),
+                              squeeze=False)
+    axes_flat = axes.flatten()
+    for ax, (name, sims), color in zip(axes_flat, all_sims.items(), colors):
+        ax.hist(sims, bins=40, color=color, alpha=0.8,
+                edgecolor="black", linewidth=0.4)
+        ax.axvline(sims.mean(), color="black", linestyle="--", linewidth=1.5,
+                   label=f"Mean: {sims.mean():.3f}")
+        ax.axvline(np.median(sims), color="white", linestyle=":", linewidth=1.5,
+                   label=f"Median: {np.median(sims):.3f}")
+        ax.set_title(name, fontsize=10, fontweight="bold")
+        ax.set_xlabel("Cosine Similarity", fontsize=9)
+        ax.set_ylabel("Count", fontsize=9)
+        ax.legend(fontsize=8)
+        ax.text(0.97, 0.92, f"SD={sims.std():.3f}\n"
+                f"[{sims.min():.2f}, {sims.max():.2f}]",
+                ha="right", va="top", transform=ax.transAxes, fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+        ax.grid(axis="y", alpha=0.3)
+    for ax in axes_flat[len(names):]:
+        ax.axis("off")
+    plt.suptitle(dist_title, fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    path = f"{output_dir}/group{group_label}_distributions.png"
+    plt.savefig(path, dpi=200, bbox_inches="tight")
+    plt.show()
+    print(f"Saved: {path}")
+
+    # Printed summary stats table
+    print(f"\nSUMMARY STATISTICS — Group {group_label}")
+    print(f"{'Model':<22} {'Mean':>8} {'Median':>8} {'SD':>8} {'Min':>8} {'Max':>8}")
+    print("-" * 66)
+    for name, sims in all_sims.items():
+        print(f"  {name:<20} {sims.mean():>8.4f} {np.median(sims):>8.4f} "
+              f"{sims.std():>8.4f} {sims.min():>8.4f} {sims.max():>8.4f}")
+
+    # 3. Side-by-side score heatmap using ref_key's top/bottom as reference
+    ref_pairs = model_results[ref_key]
+    ref_top   = ref_pairs[0].head(TOP_N).copy()
+    ref_bot   = ref_pairs[1].tail(TOP_N).copy()
+    ref_both  = pd.concat([ref_top, ref_bot]).reset_index(drop=True)
+    ref_both["rank_type"] = (["top"] * TOP_N) + (["bottom"] * TOP_N)
+
+    score_cols = list(sim_lookup.keys())
+    rows = []
+    for _, row in ref_both.iterrows():
+        ia, ib = int(row["idx_a"]), int(row["idx_b"])
+        entry  = dict(rank_type=row["rank_type"],
+                      text_a_orig=row["text_a_orig"],
+                      text_b_orig=row["text_b_orig"])
+        for mname, mat in sim_lookup.items():
+            entry[mname] = round(float(mat[ia, ib]), 4)
+        rows.append(entry)
+
+    comp_df = pd.DataFrame(rows)
+    comp_df.to_csv(f"{output_dir}/group{group_label}_cross_model_scores.csv", index=False)
+
+    score_mat   = comp_df[score_cols].values
+    pair_labels = [
+        f"[{r['rank_type'].upper()}] "
+        f"A: {r['text_a_orig'][:40]}… | B: {r['text_b_orig'][:40]}…"
+        for _, r in comp_df.iterrows()
+    ]
+    fig, ax = plt.subplots(figsize=(max(12, len(score_cols) * 1.8),
+                                    max(8, len(pair_labels) * 0.5)))
+    sns.heatmap(score_mat, annot=True, fmt=".3f", cmap="RdYlGn",
+                xticklabels=score_cols, yticklabels=pair_labels,
+                vmin=0, vmax=1, linewidths=0.3, linecolor="gray",
+                annot_kws={"size": 8}, ax=ax)
+    ax.set_title(
+        f"Group {group_label} — Cross-Model Similarity Scores\n"
+        f"(Reference pairs = {ref_key}'s top/bottom {TOP_N})",
+        fontsize=12, fontweight="bold")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right", fontsize=9)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=7)
+    plt.tight_layout()
+    path = f"{output_dir}/group{group_label}_cross_model_heatmap.png"
+    plt.savefig(path, dpi=200, bbox_inches="tight")
+    plt.show()
+    print(f"Saved: {path}")
+
+    # Readable print
+    print(f"\nCROSS-MODEL SCORES — Group {group_label} "
+          f"(reference: {ref_key} top/bottom {TOP_N} pairs)")
+    print("=" * 80)
+    for _, row in comp_df.iterrows():
+        print(f"\n  [{row['rank_type'].upper()}]")
+        print(f"  A: {row['text_a_orig']}")
+        print(f"  B: {row['text_b_orig']}")
+        for m in score_cols:
+            print(f"    {m:<30} {row[m]:.4f}")
+
+    return all_sims
+
+
+print("Helper functions defined.")
+```
+
+---
+
+# Group A — Aggregated combMIMC (N = 64)
+
+---
+
+## A1 — TF-IDF
+
+**Data**: `combMIMC_lvl2a.csv`  |  **Preprocessing**: `lvl2a` (aggressive)
+
+Bag-of-words similarity: texts are similar only if they share rare words. No
+understanding of meaning — "furious" and "angry" score zero similarity. Expected
+to be most meaningful at the aggregated level where documents are long enough for
+word overlap to be informative.
+
+```{python a1-tfidf, echo=FALSE}
+print("=" * 65)
+print("A1 — TF-IDF  (combMIMC_lvl2a)")
+print("=" * 65)
+
+vectorizer = TfidfVectorizer(min_df=1, max_df=1.0, sublinear_tf=True)
+tfidf_mat  = vectorizer.fit_transform(df_comblvl2a["textMIMC_lvl2a"])
+sm_A_tfidf = cosine_similarity(tfidf_mat)
+
+pairs_A_tfidf          = build_pairs_df(sm_A_tfidf, df_comblvl2a,
+                                         "textMIMC_lvl2a", orig_col_comb)
+top_A_tfidf, bot_A_tfidf = top_bottom(pairs_A_tfidf)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_tfidf)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_tfidf)
+plot_pairs(top_A_tfidf, bot_A_tfidf, "A1 — TF-IDF (combMIMC_lvl2a)", "A1_tfidf")
+save_pairs(top_A_tfidf, bot_A_tfidf, "A1_tfidf")
+```
+
+---
+
+## A2 — Word2Vec (`lvl2a`)
+
+**Data**: `combMIMC_lvl2a.csv`  |  **Preprocessing**: `lvl2a` (aggressive)
+
+Static word embeddings averaged per document. Captures semantic relatedness
+("furious" ≈ "angry") unlike TF-IDF, but loses word order and sentence structure.
+
+> Pre-trained `word2vec-google-news-300` vectors (~1.6 GB). Downloads once and caches.
+
+```{python a2-w2v-lvl2a, echo=FALSE}
+print("=" * 65)
+print("A2 — Word2Vec lvl2a  (combMIMC_lvl2a)")
+print("=" * 65)
+
+w2v_cache = f"{output_dir}/word2vec_google_news_300.bin"
+if os.path.exists(w2v_cache):
+    w2v_model = KeyedVectors.load(w2v_cache)
+    print("Loaded Word2Vec from cache.")
+else:
+    print("Downloading word2vec-google-news-300 (~1.6 GB) ...")
+    w2v_model = api.load("word2vec-google-news-300")
+    w2v_model.save(w2v_cache)
+    print(f"Saved: {w2v_cache}")
+
+def text_to_w2v(text, model, dim=300):
+    tokens = str(text).lower().split()
+    vecs   = [model[w] for w in tokens if w in model]
+    return np.mean(vecs, axis=0) if vecs else np.zeros(dim)
+
+def embed_w2v(texts, model):
+    embs  = np.vstack([text_to_w2v(t, model) for t in texts])
+    norms = np.linalg.norm(embs, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    n_zero = int((np.linalg.norm(embs, axis=1) == 0).sum())
+    return embs / norms, n_zero
+
+emb, nz = embed_w2v(df_comblvl2a["textMIMC_lvl2a"], w2v_model)
+if nz: print(f"Warning: {nz} zero vectors.")
+sm_A_w2v_lvl2a = cosine_similarity(emb)
+
+pairs_A_w2v_lvl2a          = build_pairs_df(sm_A_w2v_lvl2a, df_comblvl2a,
+                                              "textMIMC_lvl2a", orig_col_comb)
+top_A_w2v_lvl2a, bot_A_w2v_lvl2a = top_bottom(pairs_A_w2v_lvl2a)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_w2v_lvl2a)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_w2v_lvl2a)
+plot_pairs(top_A_w2v_lvl2a, bot_A_w2v_lvl2a,
+           "A2 — Word2Vec lvl2a (combMIMC_lvl2a)", "A2_w2v_lvl2a")
+save_pairs(top_A_w2v_lvl2a, bot_A_w2v_lvl2a, "A2_w2v_lvl2a")
+```
+
+---
+
+## A3 — Word2Vec (`lvl1a`)
+
+**Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Same model as A2 on lighter-preprocessed text. Comparing A2 vs A3 isolates the
+preprocessing effect on Word2Vec. Comparing A3 vs A4 (BERT) isolates contextualisation,
+since both receive identical `lvl1a` input.
+
+```{python a3-w2v-lvl1a, echo=FALSE}
+print("=" * 65)
+print("A3 — Word2Vec lvl1a  (combMIMC_lvl1a)")
+print("=" * 65)
+
+emb, nz = embed_w2v(df_comblvl1a["textMIMC_lvl1a"], w2v_model)
+if nz: print(f"Warning: {nz} zero vectors.")
+sm_A_w2v_lvl1a = cosine_similarity(emb)
+
+pairs_A_w2v_lvl1a          = build_pairs_df(sm_A_w2v_lvl1a, df_comblvl1a,
+                                              "textMIMC_lvl1a", orig_col_comb)
+top_A_w2v_lvl1a, bot_A_w2v_lvl1a = top_bottom(pairs_A_w2v_lvl1a)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_w2v_lvl1a)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_w2v_lvl1a)
+plot_pairs(top_A_w2v_lvl1a, bot_A_w2v_lvl1a,
+           "A3 — Word2Vec lvl1a (combMIMC_lvl1a)", "A3_w2v_lvl1a")
+save_pairs(top_A_w2v_lvl1a, bot_A_w2v_lvl1a, "A3_w2v_lvl1a")
+```
+
+---
+
+## A4 — BERT
+
+**Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Contextualised embeddings with mean-pooling. Not fine-tuned for similarity, so
+the embedding space may not be optimally structured for cosine comparison — but
+it captures word meaning in context, unlike A3 (Word2Vec).
+
+```{python a4-bert, echo=FALSE}
+print("=" * 65)
+print("A4 — BERT  (combMIMC_lvl1a)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_A_bert.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    we = st_models.Transformer("bert-base-uncased", max_seq_length=512)
+    pl = st_models.Pooling(we.get_word_embedding_dimension(),
+                            pooling_mode_mean_tokens=True)
+    m  = SentenceTransformer(modules=[we, pl])
+    emb = m.encode(df_comblvl1a["textMIMC_lvl1a"].tolist(), batch_size=16,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_A_bert = cosine_similarity(emb)
+pairs_A_bert          = build_pairs_df(sm_A_bert, df_comblvl1a,
+                                        "textMIMC_lvl1a", orig_col_comb)
+top_A_bert, bot_A_bert = top_bottom(pairs_A_bert)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_bert)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_bert)
+plot_pairs(top_A_bert, bot_A_bert, "A4 — BERT (combMIMC_lvl1a)", "A4_bert")
+save_pairs(top_A_bert, bot_A_bert, "A4_bert")
+```
+
+---
+
+## A5 — all-MiniLM-L6-v2
+
+**Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Fine-tuned for semantic similarity on 1B+ sentence pairs. The embedding space is
+trained so cosine similarity directly reflects semantic closeness. Running on
+combMIMC shows whether similarity fine-tuning changes behaviour at document scale
+vs individual scale (compare A5 vs B5).
+
+```{python a5-minilm, echo=FALSE}
+print("=" * 65)
+print("A5 — all-MiniLM-L6-v2  (combMIMC_lvl1a)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_A_minilm.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    m.max_seq_length = 128
+    emb = m.encode(df_comblvl1a["textMIMC_lvl1a"].tolist(), batch_size=64,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_A_minilm = cosine_similarity(emb)
+pairs_A_minilm          = build_pairs_df(sm_A_minilm, df_comblvl1a,
+                                          "textMIMC_lvl1a", orig_col_comb)
+top_A_minilm, bot_A_minilm = top_bottom(pairs_A_minilm)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_minilm)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_minilm)
+plot_pairs(top_A_minilm, bot_A_minilm,
+           "A5 — all-MiniLM-L6-v2 (combMIMC_lvl1a)", "A5_minilm")
+save_pairs(top_A_minilm, bot_A_minilm, "A5_minilm")
+```
+
+---
+
+## A6 — all-mpnet-base-v2
+
+**Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Highest-quality general-purpose sentence-embedding model. 768-dimensional
+embeddings, max 512 tokens. Quality ceiling for the sentence-transformer family.
+
+```{python a6-mpnet, echo=FALSE}
+print("=" * 65)
+print("A6 — all-mpnet-base-v2  (combMIMC_lvl1a)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_A_mpnet.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+    m.max_seq_length = 512
+    emb = m.encode(df_comblvl1a["textMIMC_lvl1a"].tolist(), batch_size=32,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_A_mpnet = cosine_similarity(emb)
+pairs_A_mpnet          = build_pairs_df(sm_A_mpnet, df_comblvl1a,
+                                         "textMIMC_lvl1a", orig_col_comb)
+top_A_mpnet, bot_A_mpnet = top_bottom(pairs_A_mpnet)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_mpnet)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_mpnet)
+plot_pairs(top_A_mpnet, bot_A_mpnet,
+           "A6 — all-mpnet-base-v2 (combMIMC_lvl1a)", "A6_mpnet")
+save_pairs(top_A_mpnet, bot_A_mpnet, "A6_mpnet")
+```
+
+---
+
+## A7 — paraphrase-mpnet-base-v2
+
+**Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Fine-tuned for paraphrase detection — identifying when two sentences express the
+same meaning in different words. Closest analogue to the MIMC task objective.
+
+```{python a7-para, echo=FALSE}
+print("=" * 65)
+print("A7 — paraphrase-mpnet-base-v2  (combMIMC_lvl1a)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_A_para.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/paraphrase-mpnet-base-v2")
+    m.max_seq_length = 512
+    emb = m.encode(df_comblvl1a["textMIMC_lvl1a"].tolist(), batch_size=32,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_A_para = cosine_similarity(emb)
+pairs_A_para          = build_pairs_df(sm_A_para, df_comblvl1a,
+                                        "textMIMC_lvl1a", orig_col_comb)
+top_A_para, bot_A_para = top_bottom(pairs_A_para)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_para)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_para)
+plot_pairs(top_A_para, bot_A_para,
+           "A7 — paraphrase-mpnet-base-v2 (combMIMC_lvl1a)", "A7_para")
+save_pairs(top_A_para, bot_A_para, "A7_para")
+```
+
+---
+
+## Group A — Cross-Model Comparison
+
+All Group A models share the same 64-document dataset (or a 64-document dataset
+with the same row ordering), so pair indices are consistent. TF-IDF is used as
+the reference for the side-by-side heatmap as it is the most interpretable baseline.
+
+```{python groupA-cross, echo=FALSE}
+model_results_A = {
+    "TF-IDF":       (top_A_tfidf,      bot_A_tfidf),
+    "W2V-lvl2a":    (top_A_w2v_lvl2a,  bot_A_w2v_lvl2a),
+    "W2V-lvl1a":    (top_A_w2v_lvl1a,  bot_A_w2v_lvl1a),
+    "BERT":         (top_A_bert,        bot_A_bert),
+    "MiniLM":       (top_A_minilm,      bot_A_minilm),
+    "mpnet":        (top_A_mpnet,       bot_A_mpnet),
+    "para-mpnet":   (top_A_para,        bot_A_para),
+}
+
+# Note: TF-IDF and W2V-lvl2a use df_comblvl2a; W2V-lvl1a and sentence models use df_comblvl1a.
+# Both have N=64 with the same clip-context ordering, so the pair index (i,j) refers
+# to the same clip-context cell in both dataframes.
+# Scores are therefore directly lookup-able across models within Group A.
+groupA_sim_lookup = {
+    "TF-IDF":       sm_A_tfidf,
+    "W2V-lvl2a":    sm_A_w2v_lvl2a,
+    "W2V-lvl1a":    sm_A_w2v_lvl1a,
+    "BERT":         sm_A_bert,
+    "MiniLM":       sm_A_minilm,
+    "mpnet":        sm_A_mpnet,
+    "para-mpnet":   sm_A_para,
+}
+
+all_sims_A = run_cross_model(
+    model_results_A, groupA_sim_lookup,
+    group_label="A",
+    ref_key="TF-IDF",
+    dist_title="Group A — Similarity Distributions  (combMIMC, N=64 documents)",
+    n_cols=4,
+)
+```
+
+---
+
+# Group B — Individual MIMC (N = all responses)
+
+---
+
+## B1 — TF-IDF
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl2a` (aggressive)
+
+TF-IDF on individual ~10–50 word texts. Most pairs will share zero or very few
+words, producing near-uniform low similarity. This demonstrates empirically why
+TF-IDF is unsuitable for individual-level analysis.
+
+```{python b1-tfidf, echo=FALSE}
+print("=" * 65)
+print("B1 — TF-IDF  (individual, lvl2a)")
+print("=" * 65)
+
+vectorizer_b = TfidfVectorizer(min_df=1, max_df=1.0, sublinear_tf=True)
+tfidf_mat_b  = vectorizer_b.fit_transform(df_indiv["textMIMC_lvl2a"])
+sm_B_tfidf   = cosine_similarity(tfidf_mat_b)
+
+pairs_B_tfidf          = build_pairs_df(sm_B_tfidf, df_indiv,
+                                         "textMIMC_lvl2a", orig_col_indiv)
+top_B_tfidf, bot_B_tfidf = top_bottom(pairs_B_tfidf)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_tfidf)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_tfidf)
+plot_pairs(top_B_tfidf, bot_B_tfidf, "B1 — TF-IDF (individual, lvl2a)", "B1_tfidf")
+save_pairs(top_B_tfidf, bot_B_tfidf, "B1_tfidf")
+```
+
+---
+
+## B2 — Word2Vec (`lvl2a`)
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl2a` (aggressive)
+
+Word2Vec on individual texts with aggressive preprocessing. Short texts provide
+fewer words to average, making the mean vector less stable and representative.
+
+```{python b2-w2v-lvl2a, echo=FALSE}
+print("=" * 65)
+print("B2 — Word2Vec lvl2a  (individual)")
+print("=" * 65)
+
+emb, nz = embed_w2v(df_indiv["textMIMC_lvl2a"], w2v_model)
+if nz: print(f"Warning: {nz} zero vectors.")
+sm_B_w2v_lvl2a = cosine_similarity(emb)
+
+pairs_B_w2v_lvl2a          = build_pairs_df(sm_B_w2v_lvl2a, df_indiv,
+                                              "textMIMC_lvl2a", orig_col_indiv)
+top_B_w2v_lvl2a, bot_B_w2v_lvl2a = top_bottom(pairs_B_w2v_lvl2a)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_w2v_lvl2a)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_w2v_lvl2a)
+plot_pairs(top_B_w2v_lvl2a, bot_B_w2v_lvl2a,
+           "B2 — Word2Vec lvl2a (individual)", "B2_w2v_lvl2a")
+save_pairs(top_B_w2v_lvl2a, bot_B_w2v_lvl2a, "B2_w2v_lvl2a")
+```
+
+---
+
+## B3 — Word2Vec (`lvl1a`)
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Word2Vec on light-preprocessed individual texts. Comparing B2 vs B3 shows the
+preprocessing effect at the individual level. Comparing B3 vs B4 (BERT) isolates
+contextualisation on identical individual-level inputs.
+
+```{python b3-w2v-lvl1a, echo=FALSE}
+print("=" * 65)
+print("B3 — Word2Vec lvl1a  (individual)")
+print("=" * 65)
+
+emb, nz = embed_w2v(df_indiv["textMIMC_lvl1a"], w2v_model)
+if nz: print(f"Warning: {nz} zero vectors.")
+sm_B_w2v_lvl1a = cosine_similarity(emb)
+
+pairs_B_w2v_lvl1a          = build_pairs_df(sm_B_w2v_lvl1a, df_indiv,
+                                              "textMIMC_lvl1a", orig_col_indiv)
+top_B_w2v_lvl1a, bot_B_w2v_lvl1a = top_bottom(pairs_B_w2v_lvl1a)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_w2v_lvl1a)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_w2v_lvl1a)
+plot_pairs(top_B_w2v_lvl1a, bot_B_w2v_lvl1a,
+           "B3 — Word2Vec lvl1a (individual)", "B3_w2v_lvl1a")
+save_pairs(top_B_w2v_lvl1a, bot_B_w2v_lvl1a, "B3_w2v_lvl1a")
+```
+
+---
+
+## B4 — BERT
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+BERT with mean-pooling on individual MIMC descriptions. Same architecture as A4
+but on individual texts. Comparing A4 vs B4 shows how BERT behaves across scales;
+comparing B4 vs B5 (MiniLM) isolates the effect of similarity fine-tuning.
+
+```{python b4-bert, echo=FALSE}
+print("=" * 65)
+print("B4 — BERT  (individual)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_B_bert.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    we = st_models.Transformer("bert-base-uncased", max_seq_length=512)
+    pl = st_models.Pooling(we.get_word_embedding_dimension(),
+                            pooling_mode_mean_tokens=True)
+    m  = SentenceTransformer(modules=[we, pl])
+    emb = m.encode(df_indiv["textMIMC_lvl1a"].tolist(), batch_size=32,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_B_bert = cosine_similarity(emb)
+pairs_B_bert          = build_pairs_df(sm_B_bert, df_indiv,
+                                        "textMIMC_lvl1a", orig_col_indiv)
+top_B_bert, bot_B_bert = top_bottom(pairs_B_bert)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_bert)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_bert)
+plot_pairs(top_B_bert, bot_B_bert, "B4 — BERT (individual)", "B4_bert")
+save_pairs(top_B_bert, bot_B_bert, "B4_bert")
+```
+
+---
+
+## B5 — all-MiniLM-L6-v2
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Fine-tuned for semantic similarity. Comparing B4 vs B5 on identical inputs
+isolates the effect of similarity fine-tuning at the individual level.
+
+```{python b5-minilm, echo=FALSE}
+print("=" * 65)
+print("B5 — all-MiniLM-L6-v2  (individual)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_B_minilm.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    m.max_seq_length = 128
+    emb = m.encode(df_indiv["textMIMC_lvl1a"].tolist(), batch_size=64,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_B_minilm = cosine_similarity(emb)
+pairs_B_minilm          = build_pairs_df(sm_B_minilm, df_indiv,
+                                          "textMIMC_lvl1a", orig_col_indiv)
+top_B_minilm, bot_B_minilm = top_bottom(pairs_B_minilm)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_minilm)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_minilm)
+plot_pairs(top_B_minilm, bot_B_minilm,
+           "B5 — all-MiniLM-L6-v2 (individual)", "B5_minilm")
+save_pairs(top_B_minilm, bot_B_minilm, "B5_minilm")
+```
+
+---
+
+## B6 — all-mpnet-base-v2
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Quality ceiling for the individual-level sentence-embedding models.
+
+```{python b6-mpnet, echo=FALSE}
+print("=" * 65)
+print("B6 — all-mpnet-base-v2  (individual)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_B_mpnet.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+    m.max_seq_length = 512
+    emb = m.encode(df_indiv["textMIMC_lvl1a"].tolist(), batch_size=32,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_B_mpnet = cosine_similarity(emb)
+pairs_B_mpnet          = build_pairs_df(sm_B_mpnet, df_indiv,
+                                         "textMIMC_lvl1a", orig_col_indiv)
+top_B_mpnet, bot_B_mpnet = top_bottom(pairs_B_mpnet)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_mpnet)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_mpnet)
+plot_pairs(top_B_mpnet, bot_B_mpnet,
+           "B6 — all-mpnet-base-v2 (individual)", "B6_mpnet")
+save_pairs(top_B_mpnet, bot_B_mpnet, "B6_mpnet")
+```
+
+---
+
+## B7 — paraphrase-mpnet-base-v2
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Fine-tuned for paraphrase detection. At the individual level, the paraphrase
+objective is especially relevant — different participants describing the same
+experience in their own words is structurally a paraphrase task.
+
+```{python b7-para, echo=FALSE}
+print("=" * 65)
+print("B7 — paraphrase-mpnet-base-v2  (individual)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_B_para.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/paraphrase-mpnet-base-v2")
+    m.max_seq_length = 512
+    emb = m.encode(df_indiv["textMIMC_lvl1a"].tolist(), batch_size=32,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_B_para = cosine_similarity(emb)
+pairs_B_para          = build_pairs_df(sm_B_para, df_indiv,
+                                        "textMIMC_lvl1a", orig_col_indiv)
+top_B_para, bot_B_para = top_bottom(pairs_B_para)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_para)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_para)
+plot_pairs(top_B_para, bot_B_para,
+           "B7 — paraphrase-mpnet-base-v2 (individual)", "B7_para")
+save_pairs(top_B_para, bot_B_para, "B7_para")
+```
+
+---
+
+## Group B — Cross-Model Comparison
+
+All Group B models share the same individual-level dataset. BERT is used as the
+reference model for the heatmap so the fine-tuning effect (B4 vs B5) and the
+lexical-vs-semantic contrast (B1/B2 vs B4/B5) are both immediately visible.
+
+```{python groupB-cross, echo=FALSE}
+model_results_B = {
+    "TF-IDF":       (top_B_tfidf,      bot_B_tfidf),
+    "W2V-lvl2a":    (top_B_w2v_lvl2a,  bot_B_w2v_lvl2a),
+    "W2V-lvl1a":    (top_B_w2v_lvl1a,  bot_B_w2v_lvl1a),
+    "BERT":         (top_B_bert,        bot_B_bert),
+    "MiniLM":       (top_B_minilm,      bot_B_minilm),
+    "mpnet":        (top_B_mpnet,       bot_B_mpnet),
+    "para-mpnet":   (top_B_para,        bot_B_para),
+}
+
+groupB_sim_lookup = {
+    "TF-IDF":       sm_B_tfidf,
+    "W2V-lvl2a":    sm_B_w2v_lvl2a,
+    "W2V-lvl1a":    sm_B_w2v_lvl1a,
+    "BERT":         sm_B_bert,
+    "MiniLM":       sm_B_minilm,
+    "mpnet":        sm_B_mpnet,
+    "para-mpnet":   sm_B_para,
+}
+
+all_sims_B = run_cross_model(
+    model_results_B, groupB_sim_lookup,
+    group_label="B",
+    ref_key="BERT",
+    dist_title="Group B — Similarity Distributions  (individual MIMC responses)",
+    n_cols=4,
+)
+```
+
+---
+
+## Summary
+
+```{python summary, echo=FALSE}
+print("FULL MODEL COMPARISON SUMMARY  (6 models × 2 data levels)")
+print("=" * 80)
+print(f"\nGroup A: {len(df_comblvl1a)} combMIMC documents  |  "
+      f"Group B: {len(df_indiv)} individual responses  |  "
+      f"Top/bottom N: {TOP_N}")
+
+header = f"\n  {'Model':<16} {'Preproc':<8}  {'--- Group A (combMIMC) ---':^28}  {'--- Group B (individual) ---':^28}"
+print(header)
+print(f"  {'':<16} {'':<8}  {'Mean':>6} {'SD':>6} {'Min':>6} {'Max':>6}  "
+      f"{'Mean':>6} {'SD':>6} {'Min':>6} {'Max':>6}")
+print("  " + "-" * 82)
+
+rows = [
+    ("TF-IDF",     "lvl2a", all_sims_A["TF-IDF"],    all_sims_B["TF-IDF"]),
+    ("W2V",        "lvl2a", all_sims_A["W2V-lvl2a"], all_sims_B["W2V-lvl2a"]),
+    ("W2V",        "lvl1a", all_sims_A["W2V-lvl1a"], all_sims_B["W2V-lvl1a"]),
+    ("BERT",       "lvl1a", all_sims_A["BERT"],       all_sims_B["BERT"]),
+    ("MiniLM",     "lvl1a", all_sims_A["MiniLM"],     all_sims_B["MiniLM"]),
+    ("mpnet",      "lvl1a", all_sims_A["mpnet"],       all_sims_B["mpnet"]),
+    ("para-mpnet", "lvl1a", all_sims_A["para-mpnet"], all_sims_B["para-mpnet"]),
+]
+for name, prep, sA, sB in rows:
+    print(f"  {name:<16} {prep:<8}  "
+          f"{sA.mean():>6.3f} {sA.std():>6.3f} {sA.min():>6.3f} {sA.max():>6.3f}  "
+          f"{sB.mean():>6.3f} {sB.std():>6.3f} {sB.min():>6.3f} {sB.max():>6.3f}")
+
+print(f"\nOutputs saved to: {output_dir}")
+print("  pairs_top/bottom_<ID>.csv — pair lists for each of the 14 model runs")
+print("  pairs_<ID>.png            — bar charts")
+print("  groupA/B_jaccard_top/bottom.png   — agreement heatmaps")
+print("  groupA/B_distributions.png        — score distributions")
+print("  groupA/B_cross_model_heatmap.png  — side-by-side score heatmaps")
+print("  groupA/B_cross_model_scores.csv   — full comparison tables")
+```

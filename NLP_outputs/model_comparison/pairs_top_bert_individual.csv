@@ -1,0 +1,11 @@
+idx_a,idx_b,similarity,text_a_model,text_b_model,text_a_orig,text_b_orig,clip_a,clip_b,context_a,context_b,same_clip,same_context,genre_a,genre_b,rank_type
+657,840,1.0000007152557373,watching a,watching a,watching a concert,watching a movie,Met_LOW_14,Ele_LOW_09,concert,movie,False,False,Metal,Electronic,top
+843,848,0.9999997615814209,event,event,rock band event,rock event,Met_LOW_14,Met_MED_20,concert,movie,False,False,Metal,Metal,top
+117,118,0.9662069082260132,its an energetic with a strong beat and a powerful electric,it a energetic with a strong beat and a powerful electric,its an energetic rock song with a strong beat and a powerful electric guitar,it sounded like a energetic rock song with a strong beat and a powerful electric guitar,Met_LOW_09,Jaz_LOW_19,concert,concert,False,True,Metal,Jazz,top
+165,166,0.9430860280990601,the tune is entertaining,the tune is relaxing,the tune is entertaining,the tune is relaxing,Ele_LOW_09,80s_LOW_02,videogame,bar,False,False,Electronic,80s,top
+164,169,0.9430860280990601,the tune is relaxing,the tune is entertaining,the tune is relaxing,the tune is entertaining,Jaz_MED_02,Met_MED_19,bar,bar,False,True,Jazz,Metal,top
+164,165,0.9430860280990601,the tune is relaxing,the tune is entertaining,the tune is relaxing,the tune is entertaining,Jaz_MED_02,Ele_LOW_09,bar,videogame,False,False,Jazz,Electronic,top
+164,168,0.9430860280990601,the tune is relaxing,the tune is entertaining,the tune is relaxing,the tune is entertaining,Jaz_MED_02,Ele_MED_19,bar,movie,False,False,Jazz,Electronic,top
+166,172,0.9430860280990601,the tune is relaxing,the tune is entertaining,the tune is relaxing,the tune is entertaining,80s_LOW_02,80s_MED_08,bar,videogame,False,False,80s,80s,top
+166,168,0.9430860280990601,the tune is relaxing,the tune is entertaining,the tune is relaxing,the tune is entertaining,80s_LOW_02,Ele_MED_19,bar,movie,False,False,80s,Electronic,top
+164,172,0.9430860280990601,the tune is relaxing,the tune is entertaining,the tune is relaxing,the tune is entertaining,Jaz_MED_02,80s_MED_08,bar,videogame,False,False,Jazz,80s,top
