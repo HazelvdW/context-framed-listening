@@ -30,7 +30,7 @@ import numpy as np
 ```
 
 ```{python version-check, echo=FALSE}
-# ── Environment version check ──────────────────────────────────────────────────
+# ── Environment version check ─────────────────────────────────────────────────
 import importlib, sys
 from packaging.version import Version
 
@@ -227,6 +227,39 @@ leastMIMC_value = clipContextDescrStats['PROLIFIC_PID'].min()
 
 print(f"Clip-context pair with the most reported MIMC: {mostMIMC_ccpair} ({mostMIMC_value})")
 print(f"Clip-context pair with the least reported MIMC: {leastMIMC_ccpair} ({leastMIMC_value})")
+```
+
+### MIMC description word counts
+
+Word count statistics on the raw (pre-preprocessing) thought descriptions, calculated across all MIMC trials.
+
+```{python}
+# Word count on raw original descriptions (before any preprocessing)
+dataMIMC['word_count'] = dataMIMC['descr_THOUGHT.text'].str.split().str.len()
+
+wc_min    = dataMIMC['word_count'].min()
+wc_max    = dataMIMC['word_count'].max()
+wc_mean   = dataMIMC['word_count'].mean()
+wc_sd     = dataMIMC['word_count'].std()
+wc_median = dataMIMC['word_count'].median()
+
+print("MIMC description word counts (raw text, all trials):")
+print(f"  Min:    {wc_min}")
+print(f"  Max:    {wc_max}")
+print(f"  Mean:   {wc_mean:.2f}")
+print(f"  SD:     {wc_sd:.2f}")
+print(f"  Median: {wc_median:.0f}")
+
+# Breakdown by genre and context for reference
+print("\nMean word count by genre:")
+print(dataMIMC.groupby('clip_genre')['word_count']
+      .agg(Mean='mean', SD='std', Min='min', Max='max')
+      .round(2).to_string())
+
+print("\nMean word count by context:")
+print(dataMIMC.groupby('context_word')['word_count']
+      .agg(Mean='mean', SD='std', Min='min', Max='max')
+      .round(2).to_string())
 ```
 
 ---
