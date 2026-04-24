@@ -2,7 +2,7 @@
 title: "Supplementary Study: Believability Rating Analysis"
 subtitle: "Framed Listening — Accompanying Contextual Information"
 author: "Hazel A. van der Walle (PhD student, Music, Durham University)"
-date: "April 2026"
+date: "24 April 2026"
 format:
   html:
     toc: true
