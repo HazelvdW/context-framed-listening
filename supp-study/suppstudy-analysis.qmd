@@ -1,0 +1,712 @@
+---
+title: "Supplementary Study: Believability Rating Analysis"
+subtitle: "Framed Listening — Accompanying Contextual Information"
+author: "Hazel A. van der Walle (PhD student, Music, Durham University)"
+date: "April 2026"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+    theme: cosmo
+    self-contained: true
+---
+
+All datasets generated and used for this study are openly available on GitHub:
+<https://github.com/HazelvdW/context-framed-listening>.
+
+---
+
+## Overview
+
+This document reports analyses of the **Supplementary Believability Study**.
+Before listening to each clip in the main study, participants were given a
+contextual description that varied by condition (e.g., one group was told a
+clip was heard *in a bar*; another that it was *from a videogame*). In a
+separate believability study, an independent participant sample (*N* = 80) rated
+how believable each of the 64 clip–context pairings (16 clips × 4 contexts) felt
+on a 1–5 scale.
+
+The primary scientific purpose of this study is to examine whether clip–context
+pairings rated as more believable also produce more semantically similar
+music-influenced mental content (MIMC) in the main study — that is, whether
+believability predicts the cosine similarity values from the TF-IDF and
+sentence-embedding (MiniLM) pipelines. This connection is tested in Section 7.
+
+**Research questions:**
+
+1. Do believability ratings differ across context conditions and musical genres?
+2. Do some clip–context pairings stand out as particularly high or low in believability?
+3. Does clip–context believability predict MIMC cosine similarity in Study 1?
+
+**Data:** `dataSUPPstudy.csv` — 1,280 observations (80 participants × 16 clips × 4 contexts)
+
+> **A note on statistical approach**: believability is measured on an ordinal
+> 1–5 scale. The Shapiro–Wilk test will be significant by default at N = 1,280
+> due to test sensitivity (see Section 5). All inferential tests therefore use
+> non-parametric equivalents consistent with the main study pipeline:
+> Kruskal–Wallis omnibus tests, Dunn post-hoc comparisons with Bonferroni
+> correction, and Spearman correlations.
+
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE, message = FALSE, warning = FALSE,
+  fig.width = 8, fig.height = 5, dpi = 300, out.width = "100%"
+)
+```
+
+```{r packages}
+required_packages <- c("ggplot2", "dplyr", "tidyr", "scales",
+                       "kableExtra", "dunn.test", "ARTool",
+                       "ggrepel", "ggpubr")
+
+for (pkg in required_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE))
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  library(pkg, character.only = TRUE)
+}
+
+output_dir <- "output/suppstudy"
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+```
+
+```{r paths}
+# ── Edit this path to match your local setup ───────────────────────────────────
+base_path <- paste0(
+  "/Users/hazelaileenvanderwalle/Library/CloudStorage/",
+  "OneDrive-Personal/work/study/PhD/_PROJECT/",
+  "_framedListening_NLP/context-framed-listening"
+)
+
+supp_data_path <- file.path(base_path, "dataSUPPstudy.csv")
+
+# Cosine similarity outputs from main analysis pipelines
+# (run NLP-TFIDF-analysis.qmd and NLP-SEmb-analysis.qmd first)
+tfidf_sim_path <- file.path(base_path,
+  "NLP_outputs/TFIDF/TFIDF_similarity_by_condition.csv")
+semb_sim_path  <- file.path(base_path,
+  "NLP_outputs/SentenceEmbedding/similarity_by_condition_all-MiniLM-L6-v2.csv")
+```
+
+```{r colours}
+# Consistent with main study visualisations
+context_colours <- c(
+  "bar"        = "#9e185b",
+  "concert"    = "#6369d1",
+  "movie"      = "#940e8c",
+  "videogame"  = "#86d202"
+)
+
+genre_colours <- c(
+  "80s"        = "#fc8a1e",
+  "Electronic" = "#d7ec78",
+  "Jazz"       = "#8552b6",
+  "Metal"      = "#9e1100"
+)
+```
+
+---
+
+## Data Loading and Cleaning
+
+```{r load-data}
+raw <- read.csv(supp_data_path, stringsAsFactors = FALSE, encoding = "UTF-8")
+
+# Clean non-breaking spaces from context_word
+raw$context_word <- trimws(gsub("\u00a0", "", raw$context_word))
+
+# Extract genre and arousal from clip_name
+raw$genre   <- sub("^([A-Za-z0-9]+)_.*",         "\\1", raw$clip_name)
+raw$arousal <- sub("^[A-Za-z0-9]+_(LOW|MED)_.*", "\\1", raw$clip_name)
+
+# Readable clip label (strip prefix and file extension)
+raw$clip_short <- gsub("_", " ",
+                   sub("\\.mp3$", "",
+                   sub("^[A-Za-z0-9]+_[A-Z]+_[0-9]+_", "", raw$clip_name)))
+
+# Rename key measure
+raw$believability <- raw$rating_likelihood.response
+
+# Factor ordering
+raw$context_word <- factor(raw$context_word,
+                            levels = c("bar", "concert", "movie", "videogame"))
+raw$genre        <- factor(raw$genre,
+                            levels = c("80s", "Electronic", "Jazz", "Metal"))
+raw$arousal      <- factor(raw$arousal, levels = c("LOW", "MED"))
+raw$PROLIFIC_PID <- factor(raw$PROLIFIC_PID)
+
+cat("Dimensions:         ", nrow(raw), "rows ×", ncol(raw), "columns\n")
+cat("Unique participants:", nlevels(raw$PROLIFIC_PID), "\n")
+cat("Unique clips:       ", length(unique(raw$clip_name)), "\n")
+cat("Contexts:           ", paste(levels(raw$context_word), collapse = ", "), "\n")
+cat("Genres:             ", paste(levels(raw$genre),        collapse = ", "), "\n")
+```
+
+---
+
+## Descriptive Statistics
+
+### Overall
+
+```{r desc-overall}
+overall_desc <- data.frame(
+  N      = sum(!is.na(raw$believability)),
+  Mean   = round(mean(raw$believability,   na.rm = TRUE), 3),
+  SD     = round(sd(raw$believability,     na.rm = TRUE), 3),
+  Median = median(raw$believability,       na.rm = TRUE),
+  Min    = min(raw$believability,          na.rm = TRUE),
+  Max    = max(raw$believability,          na.rm = TRUE)
+)
+kable(overall_desc, caption = "Overall believability ratings") |>
+  kable_styling(full_width = FALSE)
+```
+
+### By context condition
+
+```{r desc-context}
+desc_context <- raw |>
+  group_by(context_word) |>
+  summarise(N      = n(),
+            Mean   = round(mean(believability, na.rm = TRUE), 3),
+            SD     = round(sd(believability,   na.rm = TRUE), 3),
+            Median = median(believability,     na.rm = TRUE),
+            SE     = round(sd(believability,   na.rm = TRUE) / sqrt(n()), 3),
+            .groups = "drop")
+kable(desc_context, caption = "Believability by context condition") |>
+  kable_styling(full_width = FALSE)
+```
+
+### By genre
+
+```{r desc-genre}
+desc_genre <- raw |>
+  group_by(genre) |>
+  summarise(N      = n(),
+            Mean   = round(mean(believability, na.rm = TRUE), 3),
+            SD     = round(sd(believability,   na.rm = TRUE), 3),
+            Median = median(believability,     na.rm = TRUE),
+            SE     = round(sd(believability,   na.rm = TRUE) / sqrt(n()), 3),
+            .groups = "drop")
+kable(desc_genre, caption = "Believability by genre") |>
+  kable_styling(full_width = FALSE)
+```
+
+### By clip × context *(exported for Study 1 merge)*
+
+Mean believability for each of the 64 clip–context cells — the unit used for
+merging with cosine similarity values in Section 7.
+
+```{r desc-clip-context}
+desc_clip_context <- raw |>
+  group_by(clip_name, clip_short, context_word, genre, arousal) |>
+  summarise(N    = n(),
+            Mean = round(mean(believability, na.rm = TRUE), 3),
+            SD   = round(sd(believability,   na.rm = TRUE), 3),
+            SE   = round(sd(believability,   na.rm = TRUE) / sqrt(n()), 3),
+            .groups = "drop")
+
+write.csv(desc_clip_context,
+          file.path(output_dir, "believability_means_clip_context.csv"),
+          row.names = FALSE)
+
+kable(head(desc_clip_context, 16),
+      caption = "First 16 clip × context cells (full table exported to output/)") |>
+  kable_styling(full_width = FALSE, font_size = 11)
+```
+
+> **Exported:** `output/suppstudy/believability_means_clip_context.csv`
+
+---
+
+## Visualisations
+
+### Distribution of all believability ratings
+
+```{r fig-hist, fig.height=4}
+p_hist <- ggplot(raw, aes(x = believability)) +
+  geom_histogram(binwidth = 1, fill = "#585ccc", colour = "white", alpha = 0.85) +
+  scale_x_continuous(breaks = 1:5,
+                     labels = c("1\n(not at all\nbelievable)",
+                                "2", "3", "4",
+                                "5\n(very\nbelievable)")) +
+  labs(title    = "Distribution of Believability Ratings",
+       subtitle = "All clips and contexts combined (N = 1,280)",
+       x = "Believability (1–5)", y = "Frequency") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+p_hist
+ggsave(file.path(output_dir, "hist_believability_overall.png"),
+       p_hist, width = 7, height = 4, dpi = 300)
+```
+
+### Distribution by context condition
+
+```{r fig-violin-context}
+p_violin <- ggplot(raw, aes(x = context_word, y = believability,
+                              fill = context_word)) +
+  geom_violin(alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.size = 0.8, alpha = 0.85) +
+  geom_hline(yintercept = 3, linetype = "dashed", colour = "grey40") +
+  scale_fill_manual(values = context_colours, guide = "none") +
+  scale_y_continuous(limits = c(1, 5), breaks = 1:5) +
+  labs(title    = "Believability by Context Condition",
+       subtitle = "Violin + boxplot; dashed line = scale midpoint (3)",
+       x = "Context condition", y = "Believability (1–5)") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+p_violin
+ggsave(file.path(output_dir, "violin_believability_by_context.png"),
+       p_violin, width = 8, height = 5, dpi = 300)
+```
+
+### Context × genre interaction
+
+```{r fig-interaction}
+interaction_means <- raw |>
+  group_by(context_word, genre) |>
+  summarise(Mean = mean(believability, na.rm = TRUE),
+            SE   = sd(believability,   na.rm = TRUE) / sqrt(n()),
+            .groups = "drop")
+
+p_interaction <- ggplot(interaction_means,
+                         aes(x = context_word, y = Mean,
+                             colour = genre, group = genre)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE),
+                width = 0.15, linewidth = 0.5) +
+  geom_hline(yintercept = 3, linetype = "dashed", colour = "grey50") +
+  scale_colour_manual(values = genre_colours, name = "Genre") +
+  scale_y_continuous(limits = c(1, 5), breaks = 1:5) +
+  labs(title    = "Context × Genre: Mean Believability",
+       subtitle = "Error bars = ±1 SE; dashed line = scale midpoint",
+       x = "Context condition", y = "Mean believability (1–5)") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+p_interaction
+ggsave(file.path(output_dir, "interaction_context_genre.png"),
+       p_interaction, width = 8, height = 5, dpi = 300)
+```
+
+### Mean believability per clip (collapsed across contexts)
+
+```{r fig-clip, fig.height=7}
+clip_means_plot <- raw |>
+  group_by(clip_name, clip_short, genre) |>
+  summarise(Mean = mean(believability, na.rm = TRUE),
+            SE   = sd(believability,   na.rm = TRUE) / sqrt(n()),
+            .groups = "drop") |>
+  mutate(clip_short = factor(clip_short, levels = clip_short[order(Mean)]))
+
+p_clip <- ggplot(clip_means_plot,
+                  aes(x = clip_short, y = Mean, fill = genre)) +
+  geom_col(alpha = 0.85) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE),
+                width = 0.25, linewidth = 0.4) +
+  geom_hline(yintercept = 3, linetype = "dashed", colour = "grey40") +
+  scale_fill_manual(values = genre_colours, name = "Genre") +
+  scale_y_continuous(limits = c(0, 5), breaks = 1:5) +
+  coord_flip() +
+  labs(title    = "Mean Believability by Clip",
+       subtitle = "Collapsed across all four context conditions; error bars = ±1 SE",
+       x = NULL, y = "Mean believability (1–5)") +
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"), legend.position = "right")
+p_clip
+ggsave(file.path(output_dir, "bar_believability_by_clip.png"),
+       p_clip, width = 10, height = 7, dpi = 300)
+```
+
+### Clip × context faceted bar chart
+
+```{r fig-clip-context, fig.height=10, fig.width=10}
+clip_context_means <- raw |>
+  group_by(clip_name, clip_short, context_word, genre) |>
+  summarise(Mean = mean(believability, na.rm = TRUE),
+            SE   = sd(believability,   na.rm = TRUE) / sqrt(n()),
+            .groups = "drop") |>
+  mutate(clip_short = factor(clip_short, levels = levels(clip_means_plot$clip_short)))
+
+p_clip_context <- ggplot(clip_context_means,
+                           aes(x = clip_short, y = Mean, fill = genre)) +
+  geom_col(alpha = 0.85) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE),
+                width = 0.3, linewidth = 0.35) +
+  geom_hline(yintercept = 3, linetype = "dashed", colour = "grey40", linewidth = 0.4) +
+  facet_wrap(~ context_word, ncol = 2,
+             labeller = labeller(context_word = c(
+               "bar"        = "Bar",
+               "concert"    = "Concert",
+               "movie"      = "Movie",
+               "videogame" = "videogame"))) +
+  scale_fill_manual(values = genre_colours, name = "Genre") +
+  scale_y_continuous(limits = c(0, 5), breaks = c(1, 3, 5)) +
+  coord_flip() +
+  labs(title    = "Mean Believability by Clip and Context Condition",
+       subtitle = "Clips ordered by overall mean; error bars = ±1 SE; dashed = midpoint",
+       x = NULL, y = "Mean believability (1–5)") +
+  theme_minimal(base_size = 10) +
+  theme(plot.title      = element_text(face = "bold"),
+        strip.text      = element_text(face = "bold", size = 10),
+        legend.position = "bottom",
+        panel.spacing   = unit(1, "lines"))
+p_clip_context
+ggsave(file.path(output_dir, "bar_believability_clip_by_context.png"),
+       p_clip_context, width = 10, height = 10, dpi = 300)
+```
+
+### Heatmap: clip × context at a glance
+
+```{r fig-heatmap, fig.height=6, fig.width=7}
+p_heatmap <- ggplot(clip_context_means,
+                     aes(x = context_word, y = clip_short, fill = Mean)) +
+  geom_tile(colour = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.1f", Mean)),
+            size = 2.8, colour = "white", fontface = "bold") +
+  scale_fill_gradient2(low      = "#940e8c",
+                       mid      = "#f5f0f5",
+                       high     = "#4b9c00",
+                       midpoint = 3, limits = c(1, 5),
+                       name     = "Mean\nbelievability") +
+  scale_x_discrete(labels = c("bar"        = "Bar",
+                               "concert"    = "Concert",
+                               "movie"      = "Movie",
+                               "videogame" = "Video\ngame")) +
+  labs(title    = "Believability Heatmap: Clip × Context",
+       subtitle = "Cell values = mean rating (1–5); clips ordered by overall mean",
+       x = "Context condition", y = NULL) +
+  theme_minimal(base_size = 10) +
+  theme(plot.title      = element_text(face = "bold"),
+        axis.text.y     = element_text(size = 8),
+        legend.position = "right")
+p_heatmap
+ggsave(file.path(output_dir, "heatmap_believability_clip_context.png"),
+       p_heatmap, width = 7, height = 6, dpi = 300)
+```
+
+---
+
+## Distribution Diagnostics
+
+Believability is measured on a 1–5 ordinal scale. Shapiro–Wilk tests are provided
+for completeness, but at N = 1,280 the test is sensitive to trivial deviations from
+normality. Visual inspection of the histogram above and the results below together
+confirm that non-parametric testing is appropriate.
+
+```{r normality}
+sw_overall <- shapiro.test(raw$believability)
+cat(sprintf("Overall  —  W = %.4f, p = %.4e\n",
+            sw_overall$statistic, sw_overall$p.value))
+
+sw_context <- raw |>
+  group_by(context_word) |>
+  summarise(W = round(shapiro.test(believability)$statistic, 4),
+            p = round(shapiro.test(believability)$p.value,   4),
+            .groups = "drop")
+kable(sw_context, caption = "Shapiro–Wilk by context condition") |>
+  kable_styling(full_width = FALSE)
+```
+
+---
+
+## One-Sample Tests vs Scale Midpoint
+
+Do believability ratings differ from the scale midpoint (µ₀ = 3)?
+Wilcoxon signed-rank tests are the non-parametric equivalent of one-sample
+*t*-tests and are appropriate for ordinal data. Results report the test statistic
+*V*, the group median, and the two-tailed *p*-value.
+
+> **Note**: the `conf.int = TRUE` option for Wilcoxon signed-rank tests
+> requires sufficient non-tied Walsh averages to compute a confidence interval,
+> which is not guaranteed on a coarse 1–5 integer scale. Confidence intervals
+> are therefore omitted; medians are reported as the location summary instead.
+
+### Overall
+
+```{r wilcox-overall}
+cat("Overall N =", sum(!is.na(raw$believability)), "\n")
+cat("Unique values:", sort(unique(raw$believability)), "\n")
+w_overall <- wilcox.test(raw$believability, mu = 3)
+cat(sprintf("V = %.0f, p = %.4e, Median = %.1f\n",
+            w_overall$statistic, w_overall$p.value,
+            median(raw$believability, na.rm = TRUE)))
+```
+
+### By context condition
+
+```{r wilcox-context}
+# Diagnostic: check what levels exist in the data vs factor levels
+cat("Factor levels:  ", paste(levels(raw$context_word), collapse = " | "), "\n")
+cat("Values in data: ", paste(sort(unique(as.character(raw$context_word))),
+                               collapse = " | "), "\n\n")
+
+w_context <- do.call(rbind, lapply(levels(raw$context_word), function(ctx) {
+  d <- raw$believability[raw$context_word == ctx]
+  d <- d[!is.na(d)]
+  cat(sprintf("  %s: N = %d\n", ctx, length(d)))
+  if (length(d) < 2) {
+    return(data.frame(context = ctx, Median = NA, V = NA, p = NA))
+  }
+  wt <- tryCatch(
+    wilcox.test(d, mu = 3),
+    error = function(e) { cat("  ERROR:", conditionMessage(e), "\n"); NULL }
+  )
+  if (is.null(wt))
+    return(data.frame(context = ctx, Median = round(median(d), 3), V = NA, p = NA))
+  data.frame(context = ctx,
+             Median  = round(median(d),   3),
+             V       = wt$statistic,
+             p       = round(wt$p.value,  4))
+}))
+kable(w_context,
+      caption = "Wilcoxon signed-rank vs midpoint (3), by context") |>
+  kable_styling(full_width = FALSE)
+```
+
+### By genre
+
+```{r wilcox-genre}
+cat("Factor levels:  ", paste(levels(raw$genre), collapse = " | "), "\n")
+cat("Values in data: ", paste(sort(unique(as.character(raw$genre))),
+                               collapse = " | "), "\n\n")
+
+w_genre <- do.call(rbind, lapply(levels(raw$genre), function(g) {
+  d <- raw$believability[raw$genre == g]
+  d <- d[!is.na(d)]
+  cat(sprintf("  %s: N = %d\n", g, length(d)))
+  if (length(d) < 2) {
+    return(data.frame(genre = g, Median = NA, V = NA, p = NA))
+  }
+  wt <- tryCatch(
+    wilcox.test(d, mu = 3),
+    error = function(e) { cat("  ERROR:", conditionMessage(e), "\n"); NULL }
+  )
+  if (is.null(wt))
+    return(data.frame(genre = g, Median = round(median(d), 3), V = NA, p = NA))
+  data.frame(genre  = g,
+             Median = round(median(d),   3),
+             V      = wt$statistic,
+             p      = round(wt$p.value,  4))
+}))
+kable(w_genre,
+      caption = "Wilcoxon signed-rank vs midpoint (3), by genre") |>
+  kable_styling(full_width = FALSE)
+```
+
+---
+
+## Kruskal–Wallis Tests
+
+### Believability by context condition
+
+```{r kw-context}
+kw_context <- kruskal.test(believability ~ context_word, data = raw)
+n_obs      <- nrow(raw)
+k_ctx      <- nlevels(raw$context_word)
+eps_ctx    <- (kw_context$statistic - k_ctx + 1) / (n_obs - k_ctx)
+
+cat(sprintf("Kruskal–Wallis: H(%d) = %.3f, p = %.4e\n",
+            kw_context$parameter, kw_context$statistic, kw_context$p.value))
+cat(sprintf("Epsilon-squared = %.4f\n", eps_ctx))
+```
+
+```{r dunn-context}
+cat("\nDunn post-hoc (Bonferroni correction):\n")
+dunn.test(raw$believability, raw$context_word,
+          method = "bonferroni", kw = FALSE, label = TRUE)
+```
+
+### Believability by genre
+
+```{r kw-genre}
+kw_genre <- kruskal.test(believability ~ genre, data = raw)
+k_gen    <- nlevels(raw$genre)
+eps_gen  <- (kw_genre$statistic - k_gen + 1) / (n_obs - k_gen)
+
+cat(sprintf("Kruskal–Wallis: H(%d) = %.3f, p = %.4e\n",
+            kw_genre$parameter, kw_genre$statistic, kw_genre$p.value))
+cat(sprintf("Epsilon-squared = %.4f\n", eps_gen))
+```
+
+```{r dunn-genre}
+cat("\nDunn post-hoc (Bonferroni correction):\n")
+dunn.test(raw$believability, raw$genre,
+          method = "bonferroni", kw = FALSE, label = TRUE)
+```
+
+### Context × genre interaction (ART ANOVA)
+
+A standard two-way ANOVA assumes normally distributed residuals, which is not met
+here. The Aligned Rank Transformation (ART) ANOVA is a non-parametric alternative
+that tests for main effects and interactions on ranked data, and is appropriate for
+ordinal outcomes with a factorial design.
+
+```{r art-anova}
+raw_complete <- raw[!is.na(raw$believability) &
+                    !is.na(raw$context_word)  &
+                    !is.na(raw$genre), ]
+cat(sprintf("Rows used for ART ANOVA: %d (dropped %d with NAs)\n",
+            nrow(raw_complete), nrow(raw) - nrow(raw_complete)))
+
+art_model  <- art(believability ~ context_word * genre, data = raw_complete)
+art_result <- anova(art_model)
+print(art_result)
+```
+
+---
+
+## Believability as a Predictor of MIMC Cosine Similarity
+
+This is the primary scientific question of the supplementary study: do clip–context
+pairings rated as more believable also produce more semantically similar MIMC in
+Study 1?
+
+Believability means at the clip × context cell level (N = 64 cells) are merged
+with mean cosine similarity values from both the TF-IDF and MiniLM pipelines.
+The `Dclip_Scontext` condition is used for cosine similarity — pairs sharing a
+context label but different clips — because this condition directly isolates
+context-driven convergence, which is what believability of the context cue most
+plausibly influences. Spearman correlations are used throughout, consistent with
+the ordinal believability measure and non-normal cosine similarity distributions
+confirmed in the main analyses.
+
+> **A note on power**: the correlation analysis is conducted at the context level
+> (N = 4) and the clip × context cell level (N = 64). At N = 4, statistical power
+> is very low and p-values should not be over-interpreted — the direction and
+> magnitude of the correlation are the primary interpretive focus.
+
+### Load cosine similarity outputs
+
+```{r load-cosine}
+load_sim <- function(path, label) {
+  tryCatch(
+    read.csv(path, stringsAsFactors = FALSE),
+    error = function(e) {
+      message(label, " file not found:\n  ", path,
+              "\nRun the corresponding analysis pipeline first.")
+      NULL
+    }
+  )
+}
+
+tfidf_sim <- load_sim(tfidf_sim_path, "TF-IDF")
+semb_sim  <- load_sim(semb_sim_path,  "MiniLM")
+
+# Aggregate Dclip_Scontext pairs to context level for each pipeline
+agg_ctx_sim <- function(sim_df, sim_col_name) {
+  sim_df |>
+    filter(condition == "Dclip_Scontext") |>
+    mutate(context_word = tolower(trimws(context_i))) |>
+    group_by(context_word) |>
+    summarise(!!sim_col_name := mean(similarity, na.rm = TRUE),
+              n_pairs = n(),
+              .groups = "drop")
+}
+
+if (!is.null(tfidf_sim)) tfidf_ctx <- agg_ctx_sim(tfidf_sim, "tfidf_mean_sim")
+if (!is.null(semb_sim))  semb_ctx  <- agg_ctx_sim(semb_sim,  "semb_mean_sim")
+```
+
+### Merge with believability means
+
+```{r merge}
+# Believability collapsed to context level
+bel_context <- desc_clip_context |>
+  mutate(context_word = tolower(trimws(as.character(context_word)))) |>
+  group_by(context_word) |>
+  summarise(believability_mean = mean(Mean, na.rm = TRUE), .groups = "drop")
+
+merged <- bel_context
+if (!is.null(tfidf_sim)) merged <- left_join(merged, tfidf_ctx, by = "context_word")
+if (!is.null(semb_sim))  merged <- left_join(merged, semb_ctx,  by = "context_word")
+
+kable(merged, digits = 4,
+      caption = "Believability and cosine similarity by context condition") |>
+  kable_styling(full_width = FALSE)
+```
+
+### Spearman correlations
+
+```{r spearman-cors}
+results <- data.frame(Pipeline = character(), rs = numeric(),
+                      S = numeric(), p = numeric(), stringsAsFactors = FALSE)
+
+if (!is.null(tfidf_sim) && "tfidf_mean_sim" %in% names(merged)) {
+  ct <- cor.test(merged$believability_mean, merged$tfidf_mean_sim,
+                  method = "spearman")
+  results <- rbind(results, data.frame(
+    Pipeline = "TF-IDF",
+    rs = round(ct$estimate, 3), S = round(ct$statistic, 1),
+    p  = round(ct$p.value, 4)))
+}
+
+if (!is.null(semb_sim) && "semb_mean_sim" %in% names(merged)) {
+  cs <- cor.test(merged$believability_mean, merged$semb_mean_sim,
+                  method = "spearman")
+  results <- rbind(results, data.frame(
+    Pipeline = "MiniLM",
+    rs = round(cs$estimate, 3), S = round(cs$statistic, 1),
+    p  = round(cs$p.value, 4)))
+}
+
+kable(results,
+      caption = paste0("Spearman correlations: believability vs mean cosine ",
+                       "similarity (Dclip_Scontext, N = 4 context conditions)")) |>
+  kable_styling(full_width = FALSE)
+```
+
+### Scatter plots: believability vs cosine similarity
+
+```{r fig-scatter, fig.width=11, fig.height=5}
+make_scatter <- function(data, x_col, y_col, y_label, title) {
+  ggplot(data, aes(x = .data[[x_col]], y = .data[[y_col]],
+                   colour = context_word, label = context_word)) +
+    geom_point(size = 5, alpha = 0.9) +
+    geom_smooth(method = "lm", se = TRUE, colour = "grey40",
+                linewidth = 0.8, linetype = "dashed") +
+    geom_text_repel(size = 3.8, show.legend = FALSE,
+                    box.padding = 0.4, point.padding = 0.3) +
+    scale_colour_manual(values = context_colours, name = "Context") +
+    labs(title    = title,
+         subtitle = "Dclip_Scontext condition; Spearman correlation; N = 4 context conditions",
+         x = "Mean believability (Study 2, 1–5)",
+         y = y_label) +
+    theme_minimal(base_size = 11) +
+    theme(plot.title = element_text(face = "bold"), legend.position = "none")
+}
+
+plots <- list()
+
+if (!is.null(tfidf_sim) && "tfidf_mean_sim" %in% names(merged))
+  plots[["tfidf"]] <- make_scatter(merged, "believability_mean", "tfidf_mean_sim",
+                                    "Mean cosine similarity (TF-IDF)",
+                                    "TF-IDF: Believability vs Cosine Similarity")
+
+if (!is.null(semb_sim) && "semb_mean_sim" %in% names(merged))
+  plots[["semb"]] <- make_scatter(merged, "believability_mean", "semb_mean_sim",
+                                   "Mean cosine similarity (MiniLM)",
+                                   "MiniLM: Believability vs Cosine Similarity")
+
+if (length(plots) == 2) {
+  p_scatter <- ggarrange(plotlist = plots, ncol = 2,
+                          common.legend = TRUE, legend = "bottom")
+  print(p_scatter)
+  ggsave(file.path(output_dir, "scatter_believability_vs_cosine.png"),
+         p_scatter, width = 12, height = 5, dpi = 300)
+} else if (length(plots) == 1) {
+  print(plots[[1]])
+}
+```
+
+---
+
+## Session Info
+
+```{r session-info}
+sessionInfo()
+```
