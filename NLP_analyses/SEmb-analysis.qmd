@@ -37,14 +37,17 @@ length of individual MIMC descriptions. The model name is set in a single config
 variable below and can be swapped without modifying any other code — see the
 model comparison note in the setup section for alternatives including mpnet.
 
-Analyses mirror the combMIMC pipeline in structure, conditions, and research
-questions exactly.
+Analyses mirror the aggregated combMIMC pipeline in structure, conditions, 
+and research questions exactly.
 
 ---
 
 ## Setup
 
-```{r setup-r, echo=FALSE}
+```{r setup-r}
+#| id: r setup
+#| echo: false
+
 library(reticulate)
 
 # Uncomment to install Python packages on first run:
@@ -55,6 +58,9 @@ library(reticulate)
 ```
 
 ```{python setup-python, echo=FALSE}
+#| id: python setup
+#| echo: false
+
 import os
 import numpy as np
 import pandas as pd
@@ -81,20 +87,23 @@ os.makedirs(output_dir, exist_ok=True)
 print(f"Output directory: {output_dir}")
 ```
 
-```{python version-check, echo=FALSE}
+```{python version-check}
+#| id: python setup checks
+#| echo: false
+
 # ── Environment version check ──────────────────────────────────────────────────
 import importlib, sys
 from packaging.version import Version
 
 REQUIREMENTS = {
-    "numpy":                "1.26",
-    "pandas":               "2.1",
-    "scipy":                "1.11",
-    "sklearn":              "1.3",    # scikit-learn
-    "matplotlib":           "3.8",
-    "seaborn":              "0.13",
+    "numpy":                 "1.26",
+    "pandas":                "2.1",
+    "scipy":                 "1.11",
+    "sklearn":               "1.3",   # scikit-learn
+    "matplotlib":            "3.8",
+    "seaborn":               "0.13",
     "sentence_transformers": "2.7",   # sentence-transformers
-    "torch":                "2.1",
+    "torch":                 "2.1",
 }
 
 print(f"Python {sys.version}")
@@ -118,7 +127,10 @@ else:
     print("\nOne or more issues — run: pip install -r requirements.txt")
 ```
 
-```{python setup-python-MODEL, echo=FALSE}
+```{python setup-python-MODEL}
+#| id: model setting
+#| echo: false
+
 # ── Model configuration ────────────────────────────────────────────────────────
 # Change MODEL_NAME here to swap model; all downstream code adjusts automatically.
 #
@@ -141,10 +153,10 @@ MAX_SEQ_LEN   = 128                         # e.g. 128 MiniLM max; 512 for mpnet
 # Prefixes whose models are natively packaged for sentence-transformers
 ST_NATIVE = MODEL_NAME.startswith("sentence-transformers/")
 
-print(f"Model:            {MODEL_NAME}")
-print(f"Slug:             {MODEL_SLUG}")
-print(f"Max seq length:   {MAX_SEQ_LEN}")
-print(f"Native ST model:  {ST_NATIVE}")
+print(f"Model:           {MODEL_NAME}")
+print(f"Slug:            {MODEL_SLUG}")
+print(f"Max seq length:  {MAX_SEQ_LEN}")
+print(f"Native ST model: {ST_NATIVE}")
 ```
 
 ---
@@ -152,6 +164,9 @@ print(f"Native ST model:  {ST_NATIVE}")
 ## Helper Functions
 
 ```{python helpers}
+#| id: helper functions
+#| echo: false
+
 def sig_marker(p):
     """Return significance marker string for a p-value."""
     if p < 0.001: return "***"
@@ -187,26 +202,29 @@ def cohens_d(g1, g2):
 Load **`dataMIMC_preprocessed.csv`** — individual-level preprocessed MIMC
 descriptions, one row per participant × clip × context observation.
 
-```{python load-data, echo=FALSE}
+```{python load-data}
+#| id: get data
+#| echo: false
+
 data_path = f"{base_path}/NLP_outputs/dataMIMC_preprocessed.csv"
 df        = pd.read_csv(data_path)
 
 # Drop rows with missing text
 n_before = len(df)
-df = df.dropna(subset=["textMIMC_lvl1a"]).reset_index(drop=True)
+df = df.dropna(subset=["textMIMC_lvl1b"]).reset_index(drop=True)
 n_after  = len(df)
 if n_before != n_after:
-    print(f"Dropped {n_before - n_after} rows with missing textMIMC_lvl1a")
+    print(f"Dropped {n_before - n_after} rows with missing textMIMC_lvl1b")
 
 print(f"Shape:   {df.shape}")
 print(f"Columns: {df.columns.tolist()}")
-print(f"\nUnique clips:    {sorted(df['clip_name'].unique())}")
+print(f"\nUnique clips:  {sorted(df['clip_name'].unique())}")
 print(f"Unique contexts: {sorted(df['context_word'].unique())}")
 print(f"Unique genres:   {sorted(df['clip_genre'].unique())}")
 print(f"\nTotal individual MIMC responses: {len(df)}")
 
 # Descriptive summary of text length
-df["text_len_words"] = df["textMIMC_lvl1a"].str.split().str.len()
+df["text_len_words"] = df["textMIMC_lvl1b"].str.split().str.len()
 print(f"\nText length (words):")
 print(f"  Min:    {df['text_len_words'].min()}")
 print(f"  Median: {df['text_len_words'].median():.0f}")
@@ -225,7 +243,10 @@ Encode each individual MIMC description using the configured model. Embeddings a
 cached to disk keyed to the model slug so re-runs skip encoding entirely, and
 switching models automatically triggers a fresh encode.
 
-```{python embed, echo=FALSE}
+```{python embed}
+#| id: embeddings
+#| echo: false
+
 embed_path = f"{output_dir}/embeddings_{MODEL_SLUG}.npy"
 
 if os.path.exists(embed_path):
@@ -236,7 +257,7 @@ else:
     model = SentenceTransformer(MODEL_NAME)
     model.max_seq_length = MAX_SEQ_LEN
     embeddings = model.encode(
-        df["textMIMC_lvl1a"].tolist(),
+        df["textMIMC_lvl1b"].tolist(),
         batch_size        = 64,
         show_progress_bar = True,
         convert_to_numpy  = True,
@@ -277,6 +298,8 @@ label.
 | `Dclip_Dcontext_Dgenre` | Entirely different — dissimilarity baseline |
 
 ```{python extract-similarity, echo=FALSE}
+#| id: similarity extraction
+
 clips    = df["clip_name"].values
 contexts = df["context_word"].values
 genres   = df["clip_genre"].values
@@ -285,7 +308,7 @@ n        = len(df)
 records = {k: [] for k in [
     "item_i", "item_j", "similarity",
     "same_clip", "same_context", "same_genre", "condition",
-    "context_i", "context_j", "genre_i", "genre_j"
+    "clip_i", "clip_j", "context_i", "context_j", "genre_i", "genre_j"
 ]}
 
 # Batch dot-product similarity (embeddings are L2-normalised so dot = cosine)
@@ -318,6 +341,8 @@ for i in range(n):
         records["context_j"].append(contexts[j])
         records["genre_i"].append(genres[i])
         records["genre_j"].append(genres[j])
+        records["clip_i"].append(clips[i])
+        records["clip_j"].append(clips[j])
 
 sim_df = pd.DataFrame(records)
 
@@ -329,10 +354,376 @@ sim_df.to_csv(
     f"{output_dir}/similarity_by_condition_{MODEL_SLUG}.csv", index=False)
 
 genre_list = sorted(df["clip_genre"].unique())
-ctx_list   = sorted(df["context_word"].unique())
+cntx_list   = sorted(df["context_word"].unique())
 print("\nSaved similarity data")
 ```
 
+---
+---
+
+## Linear Mixed Models
+
+Linear mixed models (LMMs) provide a complementary, model-based approach to the
+pairwise t-tests above. The outcome is pairwise cosine similarity; fixed effects
+are `context_comb` (the context labels from the pair) and `genre_comb` (the 
+genres of items in the pair); `item_i` and `item_j` are included as a random 
+intercept to account for the fact that each individual response appears in 
+multiple pairs.
+
+Three models are fitted in sequence. Model 1 tests main effects of context, genre, and clip — clip is included as both a fixed and random effect to separate clip-specific idiosyncrasies from the genre signal, since genre is fully nested within clip. Model 2 adds mean believability (from the supplementary study) as a covariate at the clip × context cell level (64 unique values, one per clip–context pairing) — this gives genuine within-context variation in believability and avoids the collinearity that would arise from collapsing to context-level means. Model 3 tests the context × genre interaction while retaining clip as a covariate. Model comparisons use likelihood ratio tests (ANOVA on nested models) to determine whether each additional term improves fit.
+
+Following the LMMs, estimated marginal means (emmeans) unpack pairwise context
+differences while controlling for genre. Finally, a Random Forest classifier and
+a Linear Discriminant Analysis (LDA) are used to assess how well context condition
+can be recovered from similarity scores alone.
+
+### LMM setup & prep
+
+```{r lmm-setup}
+#| id: python to r
+
+# ── Packages ──────────────────────────────────────────────────────────────────
+required <- c("lme4", "lmerTest", "MuMIn", "emmeans",
+              "randomForest", "MASS", "dplyr", "ggplot2")
+for (pkg in required) {
+  if (!requireNamespace(pkg, quietly = TRUE))
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  library(pkg, character.only = TRUE)
+}
+
+# ── Paths (inherit from Python session via reticulate base_path) ──────────────
+base_path  <- paste0(
+  "/Users/hazelaileenvanderwalle/Library/CloudStorage/",
+  "OneDrive-Personal/work/study/PhD/_PROJECT/",
+  "_framedListening_NLP/context-framed-listening"
+)
+output_dir <- file.path(base_path, "NLP_outputs", "SentenceEmbedding")
+
+# Load pairwise similarity data (written by the Python chunk above)
+# MODEL_SLUG is set in the Python session — use the same name here
+model_slug  <- py$MODEL_SLUG   # pulls MODEL_SLUG from the Python environment
+sim_df_path <- file.path(output_dir,
+                         paste0("similarity_by_condition_",model_slug,".csv"))
+sim_df      <- read.csv(sim_df_path, stringsAsFactors = FALSE)
+
+cat("Loaded similarity data:", nrow(sim_df), "pairs\n")
+cat("Columns:", paste(names(sim_df), collapse = ", "), "\n")
+```
+
+```{r lmm-prep}
+#| id: pair combination chunk
+
+# Using sum-to-zero (effects) coding so no reference level is used —
+# each coefficient represents deviation from the grand mean,
+# anova() gives Type III tests for each level independently
+options(contrasts = c("contr.sum", "contr.poly"))
+
+# Define similarity pair combination variables
+sim_df$genre_comb   <- paste0(sim_df$genre_i,  "_",sim_df$genre_j)
+sim_df$context_comb <- paste0(sim_df$context_i,"_",sim_df$context_j)
+sim_df$clip_comb    <- paste0(sim_df$clip_i,   "_",sim_df$clip_j)
+
+cat("genre_comb levels:\n");     print(table(sim_df$genre_comb))
+cat("\ncontext_comb levels:\n"); print(table(sim_df$context_comb))
+# clip_comb levels levels not pasted as it's quite long
+
+# Factor predictors — comb variables as factors for the LMMs
+sim_df$genre_comb   <- factor(sim_df$genre_comb)
+sim_df$context_comb <- factor(sim_df$context_comb)
+sim_df$clip_comb    <- factor(sim_df$clip_comb)
+sim_df$item_i       <- factor(sim_df$item_i)
+sim_df$item_j       <- factor(sim_df$item_j)
+
+cat("\ncontext_comb levels:", nlevels(sim_df$context_comb), "\n")
+cat("\ngenre_comb levels:  ", nlevels(sim_df$genre_comb),   "\n")
+cat("\nclip_comb levels:   ", nlevels(sim_df$clip_comb),    "\n")
+
+# ── Believability covariate ───────────────────────────────────────────────────
+supp_path <- file.path(base_path, "dataSUPPstudy.csv")
+supp      <- read.csv(supp_path, stringsAsFactors = FALSE)
+
+believe_cell <- supp |>
+  group_by(clip_name, context_word) |>
+  summarise(believability = mean(rating_likelihood.response, na.rm = TRUE),
+            .groups = "drop")
+
+believe_cell$clip_merge <- tolower(sapply(
+  strsplit(sub("\\.mp3$", "", believe_cell$clip_name), "_"),
+  function(x) {
+    prefix <- switch(tolower(x[1]),
+      "electronic" = "ele", "jazz" = "jaz", "metal" = "met", tolower(x[1]))
+    paste(c(prefix, x[2], x[3]), collapse = "_")
+  }
+))
+believe_cell$cntx_merge <- trimws(tolower(believe_cell$context_word))
+
+# Merge believability for item i
+sim_df$clip_i_merge <- trimws(tolower(as.character(sim_df$clip_i)))
+sim_df$cntx_i_merge  <- trimws(tolower(as.character(sim_df$context_i)))
+
+sim_df <- merge(sim_df, believe_cell[, c("clip_merge", "cntx_merge", "believability")],
+                by.x = c("clip_i_merge", "cntx_i_merge"),
+                by.y = c("clip_merge",   "cntx_merge"),
+                all.x = TRUE)
+names(sim_df)[names(sim_df) == "believability"] <- "believability_i"
+
+# Merge believability for item j
+sim_df$clip_j_merge <- trimws(tolower(as.character(sim_df$clip_j)))
+sim_df$cntx_j_merge  <- trimws(tolower(as.character(sim_df$context_j)))
+
+sim_df <- merge(sim_df, 
+                believe_cell[, c("clip_merge", "cntx_merge", "believability")],
+                by.x = c("clip_j_merge", "cntx_j_merge"),
+                by.y = c("clip_merge",   "cntx_merge"),
+                all.x = TRUE)
+names(sim_df)[names(sim_df) == "believability"] <- "believability_j"
+
+# Pair-level believability = mean of both items' cell ratings
+sim_df$believability_pair <- rowMeans(
+  sim_df[, c("believability_i", "believability_j")], na.rm = FALSE)
+
+cat("\nRows with full pair believability:", sum(!is.na(sim_df$believability_pair)),
+    "of", nrow(sim_df), "\n")
+cat("Rows with NA (unmatched):", sum(is.na(sim_df$believability_pair)), "\n")
+```
+
+### LMM Models
+
+```{r lmm-model-checks}
+#| id: LMM model checks
+#| eval: false
+#| echo: false
+
+S <- summarise(group_by(sim_df,context_comb,genre_comb),
+               M=mean(similarity,na.rm=TRUE),
+               SD=sd(similarity,na.rm=TRUE))
+S
+SC <- summarise(group_by(sim_df,context_comb),
+                M=mean(similarity,na.rm=TRUE),
+                SD=sd(similarity,na.rm=TRUE))
+SC
+SG <- summarise(group_by(sim_df,genre_comb),
+                M=mean(similarity,na.rm=TRUE),
+                SD=sd(similarity,na.rm=TRUE))
+SG
+```
+
+#### Model 1: context + genre main effects
+
+```{r lmm-model1}
+#| id: LMM model 1, context + genre main effects
+#| eval: true #false skips this section
+#| echo: true
+
+cat("———MODEL 1: similarity ~ context_comb + genre_comb 
+               + (1 | item_i) + (1 | item_j), + (1 | clip_comb)———\n")
+
+model1 <- lmer(similarity ~ context_comb + genre_comb 
+               + (1 | item_i) + (1 | item_j) + (1 | clip_comb),
+               data = sim_df, REML = FALSE)
+
+print(anova(model1))
+cat("\n———Omnibus fixed effects — no reference level———\n")
+print(car::Anova(model1, type = 3))
+cat("\n———Pseudo-R² (Nakagawa & Schielzeth), variance explained:———\n")
+print(MuMIn::r.squaredGLMM(model1))
+cat("\n———EMMean, context combos with CI———\n")
+print(emmeans(model1, ~ context_comb))   # mean per context combination with CI
+cat("\n———EMMean, genre combos with CI———\n")
+print(emmeans(model1, ~ genre_comb))     # mean per genre combination with CI
+cat("\n———random effects variance check———\n")
+print(summary(model1)$varcor)   # random effects variance only, no fixed effect coefficients
+
+```
+
+#### Model 2: + believability covariate
+
+```{r lmm-model2}
+#| id: LMM model 2, context + genre main effects + believability covariate
+#| eval: true
+#| echo: true
+
+cat("\n———MODEL 2: + believability_pair———\n")
+
+model2 <- lmer(similarity ~ context_comb + genre_comb + believability_pair 
+               + (1 | item_i) + (1 | item_j) + (1 | clip_comb),
+               data = sim_df, REML = FALSE)
+
+print(anova(model2))
+cat("\n———Omnibus fixed effects — no reference level———\n")
+print(car::Anova(model2, type = 3))
+cat("\n———Pseudo-R² (Nakagawa & Schielzeth), variance explained:———\n")
+print(MuMIn::r.squaredGLMM(model2))
+cat("\n———EMMean, context combos with CI———\n")
+print(emmeans(model2, ~ context_comb))
+cat("\n———EMMean, genre combos with CI———\n")
+print(emmeans(model2, ~ genre_comb))
+cat("\n———random effects variance check———\n")
+print(summary(model2)$varcor)
+
+cat("\n———Model comparison — Model 1 vs Model 2 (believability_pair):———\n")
+print(anova(model1, model2))
+
+```
+
+#### Model 3: context × genre interaction
+
+```{r lmm-model3}
+#| id: LMM model 3, context x genre interaction
+#| eval: true
+#| echo: true
+
+cat("\n———MODEL 3A: context_comb × genre_comb interaction (downsized sample)———\n")
+# *NOTE: with 1.9M rows, context_comb * genre_comb generates 16×16 = 256
+#        interaction terms — too much for memory with three random effects.
+set.seed(41100)
+sim_sub <- sim_df[sample(nrow(sim_df), 200000), ]
+
+model3A <- lmer(similarity ~ context_comb * genre_comb 
+               + (1 | item_i) + (1 | item_j),
+               data = sim_sub, REML = FALSE)
+
+print(anova(model3A))
+cat("\n———Omnibus fixed effects — no reference level———\n")
+print(car::Anova(model3A, type = 3))
+cat("\n———Pseudo-R²:———\n")
+print(MuMIn::r.squaredGLMM(model3A))
+cat("\n———EMMean, context combos with CI———\n")
+print(emmeans(model3A, ~ context_comb))
+cat("\n———EMMean, genre combos with CI———\n")
+print(emmeans(model3A, ~ genre_comb))
+cat("\n———random effects variance check———\n")
+print(summary(model3A)$varcor)
+
+cat("\n———MODEL 3B: context_i × genre_i interaction (simplified, full data)———\n")
+# Uses single-item _i variables (4 levels each) rather than _comb (16 levels).
+# Tests whether context effect on similarity interacts with music genre —
+# more directly interpretable for RQ3 and fits in memory on the full dataset.
+sim_df$context_i <- factor(sim_df$context_i)
+sim_df$genre_i   <- factor(sim_df$genre_i)
+
+model3B <- lmer(similarity ~ context_i * genre_i 
+               + (1 | item_i) + (1 | item_j),
+               data = sim_df, REML = FALSE)
+
+print(anova(model3B))
+cat("\n———Omnibus fixed effects — no reference level———\n")
+print(car::Anova(model3B, type = 3))
+cat("\n———Pseudo-R²:———\n")
+print(MuMIn::r.squaredGLMM(model3B))
+cat("\n———EMMean, context_i with CI———\n")
+print(emmeans(model3B, ~ context_i))
+cat("\n———EMMean, genre_i with CI———\n")
+print(emmeans(model3B, ~ genre_i))
+cat("\n———EMMean, context_i × genre_i cell means———\n")
+print(emmeans(model3B, ~ context_i | genre_i))
+cat("\n———random effects variance check———\n")
+print(summary(model3B)$varcor)
+
+```
+
+```{r model-comparisons}
+#| id: LMM model comparisons
+#| eval: true
+#| echo: true
+
+cat("\n———Model 1 vs Model 2 (believability_pair):———\n")
+print(anova(model1, model2))
+
+cat("\n———Model 1A vs Model 3A (downsized, context_comb × genre_comb interaction):———\n")
+# Refit Model 1 on same downsized sample for a valid comparison with Model 3A
+set.seed(41100)
+sim_sub  <- sim_df[sample(nrow(sim_df), 200000), ]
+model1A  <- lmer(similarity ~ context_comb + genre_comb
+                 + (1 | item_i) + (1 | item_j),
+                 data = sim_sub, REML = FALSE)
+print(anova(model1A, model3A))
+
+# *NB: model3B cannot be directly compared to model1 via anova() because
+#      fixed effects are differently specified (_i vs _comb variables)
+```
+
+### Estimated Marginal Means
+
+```{r emmeans}
+#| id: Estimated marginal means, pairwise context comparisons
+#| eval: true
+#| echo: true
+
+cat("———ESTIMATED MARGINAL MEANS — Model 3A (downsized)———\n")
+cat("(pairwise context contrasts, Tukey adjustment)\n\n")
+print(emmeans(model3A, pairwise ~ context_comb, adjust = "tukey"))
+
+cat("\n———context × genre cell means (Model 3A):———\n")
+print(emmeans(model3A, ~ context_comb | genre_comb))
+
+cat("\n———ESTIMATED MARGINAL MEANS — Model 3B (simplified, full data)———\n")
+cat("(pairwise context contrasts, Tukey adjustment)\n\n")
+print(emmeans(model3B, pairwise ~ context_i, adjust = "tukey"))
+
+cat("\n———context_i × genre_i cell means (Model 3B):———\n")
+print(emmeans(model3B, ~ context_i | genre_i))
+
+```
+
+### Random Forest
+
+*Question:* _how well can context condition be recovered from similarity scores alone?_
+
+```{r random-forest}
+#| id: Random Forest, classify context from similarity
+
+sim_rf <- sim_df[sim_df$condition == "Dclip_Scontext", ]
+sim_rf$context_comb <- factor(sim_rf$context_comb)
+
+# Downsample to avoid memory limits — stratified sample, equal per context class.
+# 50k pairs total (12.5k per class) is ample for a single-predictor classifier.
+MAX_PER_CLASS <- 12500
+set.seed(41100)
+
+# Compute the actual cap outside the pipe (min across all class sizes vs MAX_PER_CLASS)
+class_cap <- min(MAX_PER_CLASS, min(table(sim_rf$context_comb)))
+sim_rf <- sim_rf |>
+  group_by(context_comb) |>
+  slice_sample(n = class_cap) |>
+  ungroup() |>
+  as.data.frame()
+
+cat(sprintf("Downsampled to %d pairs for Random Forest (%d per class max)\n",
+            nrow(sim_rf), MAX_PER_CLASS))
+print(table(sim_rf$context_comb))
+
+rf_model <- randomForest(context_comb ~ similarity,
+                          data      = sim_rf,
+                          ntree     = 500,
+                          importance = TRUE)
+
+cat("\nRANDOM FOREST: context_comb ~ similarity\n")
+print(rf_model)
+cat("\nOOB classification rate:",
+    round(1 - rf_model$err.rate[500, "OOB"], 3), "\n")
+cat("Variable importance:\n")
+print(importance(rf_model))
+```
+
+### Linear Discriminant Analysis
+
+```{r lda}
+# ── Linear Discriminant Analysis: context from similarity ─────────────────────
+# Uses the same downsampled frame as the Random Forest above for consistency.
+lda_model <- MASS::lda(context_comb ~ similarity, data = sim_rf)
+lda_pred  <- predict(lda_model, sim_rf)
+lda_acc   <- mean(lda_pred$class == sim_rf$context_comb)
+
+cat("LDA: context_comb ~ similarity\n")
+print(lda_model)
+cat(sprintf("\nLDA classification accuracy: %.3f\n", lda_acc))
+
+cat("\nConfusion matrix:\n")
+print(table(Predicted = lda_pred$class, Actual = sim_rf$context_comb))
+```
+
+---
 ---
 
 ## RQ1 — Does Context Shape MIMC Similarity?
@@ -392,25 +783,25 @@ print(f"\nSaved omnibus post-hoc table")
 ### Context Effect: Dclip_Scontext vs Dclip_Dcontext_Dgenre
 
 ```{python rq1-context-effect, echo=FALSE}
-ctx_sims      = sim_df.loc[sim_df["condition"] == "Dclip_Scontext",       "similarity"]
+cntx_sims      = sim_df.loc[sim_df["condition"] == "Dclip_Scontext",       "similarity"]
 baseline_sims = sim_df.loc[sim_df["condition"] == "Dclip_Dcontext_Dgenre", "similarity"]
 
-t, p, df_val = welch_t(ctx_sims, baseline_sims)
-d            = cohens_d(ctx_sims, baseline_sims)
+t, p, df_val = welch_t(cntx_sims, baseline_sims)
+d            = cohens_d(cntx_sims, baseline_sims)
 
 print("RQ1 — CONTEXT EFFECT")
 print("=" * 60)
-print(f"  Dclip_Scontext         M = {ctx_sims.mean():.4f}  (N = {len(ctx_sims):,})")
+print(f"  Dclip_Scontext         M = {cntx_sims.mean():.4f}  (N = {len(cntx_sims):,})")
 print(f"  Dclip_Dcontext_Dgenre  M = {baseline_sims.mean():.4f}  (N = {len(baseline_sims):,})")
-print(f"  Delta = {ctx_sims.mean() - baseline_sims.mean():+.4f}")
+print(f"  Delta = {cntx_sims.mean() - baseline_sims.mean():+.4f}")
 print(f"  Welch's t({df_val:.1f}) = {t:.3f},  p = {p:.4f}  {sig_marker(p)}")
 print(f"  Cohen's d = {d:.3f}")
 
 rq1_context = dict(
-    mean_ctx=float(ctx_sims.mean()), mean_base=float(baseline_sims.mean()),
-    delta=float(ctx_sims.mean()-baseline_sims.mean()),
+    mean_ctx=float(cntx_sims.mean()), mean_base=float(baseline_sims.mean()),
+    delta=float(cntx_sims.mean()-baseline_sims.mean()),
     t=t, df=df_val, p=p, sig=sig_marker(p), d=d,
-    n_ctx=len(ctx_sims), n_base=len(baseline_sims)
+    n_ctx=len(cntx_sims), n_base=len(baseline_sims)
 )
 ```
 
@@ -492,20 +883,21 @@ additional convergence beyond either alone — **this is the first pipeline in t
 chain where this test is available**, as individual-level data provides within-cell
 pairs across different participants.
 
+
 ### Clip vs Context
 
 ```{python rq2-clip-vs-context, echo=FALSE}
 clip_sims = sim_df.loc[sim_df["condition"] == "Sclip_Dcontext", "similarity"]
-ctx_sims  = sim_df.loc[sim_df["condition"] == "Dclip_Scontext", "similarity"]
+cntx_sims  = sim_df.loc[sim_df["condition"] == "Dclip_Scontext", "similarity"]
 
-t, p, df_val = welch_t(clip_sims, ctx_sims)
-d            = cohens_d(clip_sims, ctx_sims)
+t, p, df_val = welch_t(clip_sims, cntx_sims)
+d            = cohens_d(clip_sims, cntx_sims)
 
 rq2_primary = dict(
-    mean_clip=float(clip_sims.mean()), mean_ctx=float(ctx_sims.mean()),
-    diff=float(clip_sims.mean()-ctx_sims.mean()),
+    mean_clip=float(clip_sims.mean()), mean_ctx=float(cntx_sims.mean()),
+    diff=float(clip_sims.mean()-cntx_sims.mean()),
     t=t, df=df_val, p=p, sig=sig_marker(p), d=d,
-    n_clip=len(clip_sims), n_ctx=len(ctx_sims)
+    n_clip=len(clip_sims), n_ctx=len(cntx_sims)
 )
 
 print("RQ2a — CLIP vs CONTEXT")
@@ -576,10 +968,10 @@ fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 ax = axes[0]
 clip_ci = stats.t.interval(0.95, len(clip_sims)-1,
                             loc=clip_sims.mean(), scale=stats.sem(clip_sims))
-ctx_ci  = stats.t.interval(0.95, len(ctx_sims)-1,
-                            loc=ctx_sims.mean(),  scale=stats.sem(ctx_sims))
-means_rq2 = [clip_sims.mean(), ctx_sims.mean()]
-errs_rq2  = [(clip_ci[1]-clip_ci[0])/2, (ctx_ci[1]-ctx_ci[0])/2]
+cntx_ci  = stats.t.interval(0.95, len(cntx_sims)-1,
+                            loc=cntx_sims.mean(),  scale=stats.sem(cntx_sims))
+means_rq2 = [clip_sims.mean(), cntx_sims.mean()]
+errs_rq2  = [(clip_ci[1]-clip_ci[0])/2, (cntx_ci[1]-cntx_ci[0])/2]
 groups    = ["Clip-Driven\n(Same Clip, Diff Ctx)", "Context-Driven\n(Diff Clip, Same Ctx)"]
 cols_rq2  = ["#3498db", "#e74c3c"]
 
@@ -670,30 +1062,30 @@ print("-" * 70)
 
 susceptibility_rows = []
 for genre in genre_list:
-    ctx_sims_g = sim_df.loc[
+    cntx_sims_g = sim_df.loc[
         (sim_df["condition"] == "Dclip_Scontext") &
         (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
-    if len(ctx_sims_g) == 0:
-        ctx_sims_g = sim_df.loc[
+    if len(cntx_sims_g) == 0:
+        cntx_sims_g = sim_df.loc[
             (sim_df["condition"] == "Dclip_Scontext") &
             ((sim_df["genre_i"] == genre) | (sim_df["genre_j"] == genre)), "similarity"]
     baseline_g = sim_df.loc[
         (sim_df["condition"] == "Dclip_Dcontext_Dgenre") &
         (sim_df["genre_i"] == genre), "similarity"]
 
-    if len(ctx_sims_g) > 1 and len(baseline_g) > 1:
-        framing_gain = ctx_sims_g.mean() - baseline_g.mean()
-        t, p, df_val = welch_t(ctx_sims_g, baseline_g)
-        d            = cohens_d(ctx_sims_g, baseline_g)
+    if len(cntx_sims_g) > 1 and len(baseline_g) > 1:
+        framing_gain = cntx_sims_g.mean() - baseline_g.mean()
+        t, p, df_val = welch_t(cntx_sims_g, baseline_g)
+        d            = cohens_d(cntx_sims_g, baseline_g)
         susceptibility_rows.append(dict(
             genre=genre,
-            context_driven_mean=ctx_sims_g.mean(),
+            context_driven_mean=cntx_sims_g.mean(),
             baseline_mean=baseline_g.mean(),
             framing_gain=framing_gain,
             t=t, df=df_val, p=p, d=d,
-            n_ctx=len(ctx_sims_g), n_base=len(baseline_g)
+            n_ctx=len(cntx_sims_g), n_base=len(baseline_g)
         ))
-        print(f"  {genre.upper():14s}  Ctx M={ctx_sims_g.mean():.4f}  "
+        print(f"  {genre.upper():14s}  Ctx M={cntx_sims_g.mean():.4f}  "
               f"Base M={baseline_g.mean():.4f}  "
               f"Gain={framing_gain:+.4f}  d={d:.3f}  p={p:.4f}")
 
@@ -727,24 +1119,24 @@ for genre in genre_list:
     clip_sims_g = sim_df.loc[
         (sim_df["condition"] == "Sclip_Dcontext") &
         (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
-    ctx_sims_g = sim_df.loc[
+    cntx_sims_g = sim_df.loc[
         (sim_df["condition"] == "Dclip_Scontext") &
         (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
-    if len(clip_sims_g) > 1 and len(ctx_sims_g) > 1:
-        t, p, df_val = welch_t(clip_sims_g, ctx_sims_g)
-        d            = cohens_d(clip_sims_g, ctx_sims_g)
-        dominant     = "CLIP" if clip_sims_g.mean() > ctx_sims_g.mean() else "CONTEXT"
+    if len(clip_sims_g) > 1 and len(cntx_sims_g) > 1:
+        t, p, df_val = welch_t(clip_sims_g, cntx_sims_g)
+        d            = cohens_d(clip_sims_g, cntx_sims_g)
+        dominant     = "CLIP" if clip_sims_g.mean() > cntx_sims_g.mean() else "CONTEXT"
         mod_rows.append(dict(
             genre=genre,
             clip_mean=clip_sims_g.mean(), clip_sd=clip_sims_g.std(),
-            context_mean=ctx_sims_g.mean(), context_sd=ctx_sims_g.std(),
-            diff=clip_sims_g.mean()-ctx_sims_g.mean(),
+            context_mean=cntx_sims_g.mean(), context_sd=cntx_sims_g.std(),
+            diff=clip_sims_g.mean()-cntx_sims_g.mean(),
             dominant=dominant,
             t=t, df=df_val, p=p, d=d,
-            n_clip=len(clip_sims_g), n_context=len(ctx_sims_g)
+            n_clip=len(clip_sims_g), n_context=len(cntx_sims_g)
         ))
         print(f"  {genre.upper():14s}  Clip M={clip_sims_g.mean():.4f}  "
-              f"Ctx M={ctx_sims_g.mean():.4f}  "
+              f"Ctx M={cntx_sims_g.mean():.4f}  "
               f"-> {dominant:7s} dominant  d={d:.3f}  p={p:.4f}")
 
 genre_mod_df = pd.DataFrame(mod_rows)
@@ -874,8 +1266,8 @@ convergence they produce. Descriptive characterisation only.
 print("PAIRWISE CONTEXT COMPARISONS  (Bonferroni corrected)")
 print("-" * 70)
 
-ctx_pairs = []
-for c1, c2 in combinations(ctx_list, 2):
+cntx_pairs = []
+for c1, c2 in combinations(cntx_list, 2):
     g1 = sim_df.loc[
         (sim_df["condition"] == "Dclip_Scontext") &
         (sim_df["context_i"] == c1) & (sim_df["context_j"] == c1), "similarity"]
@@ -885,13 +1277,13 @@ for c1, c2 in combinations(ctx_list, 2):
     if len(g1) > 1 and len(g2) > 1:
         t, p, df_val = welch_t(g1, g2)
         d = cohens_d(g1, g2)
-        ctx_pairs.append(dict(context1=c1, context2=c2,
+        cntx_pairs.append(dict(context1=c1, context2=c2,
                                mean1=g1.mean(), mean2=g2.mean(),
                                diff=g1.mean()-g2.mean(),
                                t=t, df=df_val, p=p, d=d,
                                n1=len(g1), n2=len(g2)))
 
-context_pairs_df = pd.DataFrame(ctx_pairs)
+context_pairs_df = pd.DataFrame(cntx_pairs)
 if len(context_pairs_df) > 0:
     context_pairs_df["p_bonf"]   = (context_pairs_df["p"] * len(context_pairs_df)).clip(upper=1.0)
     context_pairs_df["sig"]      = context_pairs_df["p"].apply(sig_marker)
@@ -939,14 +1331,14 @@ if len(genre_pairs_df) > 0:
 Full within/between similarity for context and genre.
 
 ```{python exploratory-similarity-matrices, echo=FALSE}
-ctx_within_exp = []
-for ctx in ctx_list:
+cntx_within_exp = []
+for ctx in cntx_list:
     sims = sim_df.loc[
         (sim_df["condition"] == "Dclip_Scontext") &
         (sim_df["context_i"] == ctx) & (sim_df["context_j"] == ctx), "similarity"]
     if len(sims) > 0:
-        ctx_within_exp.append(dict(context=ctx, mean=sims.mean()))
-context_within_df = pd.DataFrame(ctx_within_exp)
+        cntx_within_exp.append(dict(context=ctx, mean=sims.mean()))
+context_within_df = pd.DataFrame(cntx_within_exp)
 
 genre_within_exp = []
 for genre in genre_list:

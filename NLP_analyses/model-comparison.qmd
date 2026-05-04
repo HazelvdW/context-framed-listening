@@ -35,10 +35,10 @@ same conceptually similar pairs, is the evidence needed to justify model choices
 
 **All models × both levels:**
 
-| | TF-IDF | W2V `lvl2a` | W2V `lvl1a` | BERT | MiniLM | mpnet | para-mpnet |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **A — combMIMC** | A1 | A2 | A3 | A4 | A5 | A6 | A7 |
-| **B — individual** | B1 | B2 | B3 | B4 | B5 | B6 | B7 |
+| | TF-IDF | W2V `lvl2a` | W2V `lvl1a` | BERT | BERTweet | para-MiniLM | MiniLM | mpnet | para-mpnet |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **A — combMIMC** | A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8 | A9 |
+| **B — individual** | B1 | B2 | B3 | B4 | B5 | B6 | B7 | B8 | B9 |
 
 ---
 
@@ -61,6 +61,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy import stats
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise         import cosine_similarity
@@ -90,14 +91,15 @@ import importlib, sys
 from packaging.version import Version
 
 REQUIREMENTS = {
-    "numpy":                "1.26",
-    "pandas":               "2.1",
-    "sklearn":              "1.3",    # scikit-learn
-    "matplotlib":           "3.8",
-    "seaborn":              "0.13",
+    "numpy":                 "1.26",
+    "pandas":                "2.1",
+    "scipy":                 "1.11",
+    "sklearn":               "1.3",   # scikit-learn
+    "matplotlib":            "3.8",
+    "seaborn":               "0.13",
     "sentence_transformers": "2.7",   # sentence-transformers
-    "torch":                "2.1",
-    "gensim":               "4.3",
+    "torch":                 "2.1",
+    "gensim":                "4.3",
 }
 
 print(f"Python {sys.version}")
@@ -137,8 +139,8 @@ if "text_original" not in df_comblvl2a.columns or "text_original" not in df_comb
     )
 orig_col_comb = "text_original"
 
-print(f"combMIMC_lvl2a: {len(df_comblvl2a)} documents  |  columns: {df_comblvl2a.columns.tolist()}")
-print(f"combMIMC_lvl1a: {len(df_comblvl1a)} documents  |  columns: {df_comblvl1a.columns.tolist()}")
+print(f"combMIMC_lvl2a: {len(df_comblvl2a)} documents | columns: {df_comblvl2a.columns.tolist()}")
+print(f"combMIMC_lvl1a: {len(df_comblvl1a)} documents | columns: {df_comblvl1a.columns.tolist()}")
 
 # ── Group B: individual MIMC responses ────────────────────────────────────────
 df_indiv = pd.read_csv(f"{base_path}/NLP_outputs/dataMIMC_preprocessed.csv")
@@ -154,7 +156,7 @@ df_indiv = df_indiv.dropna(
 ).reset_index(drop=True)
 
 print(f"\ndataMIMC_preprocessed: {len(df_indiv)} individual responses")
-print(f"  Original text column: '{orig_col_indiv}'")
+print(f"   Original text column: '{orig_col_indiv}'")
 ```
 
 ---
@@ -281,10 +283,86 @@ def jaccard(a, b):
     return len(a & b) / len(a | b) if (a or b) else 1.0
 
 
+def rank_correlation(sim_lookup, group_label):
+    """
+    For every pair of models, extract all pairwise cosine similarity scores
+    from the upper triangle of each similarity matrix, rank them, then compute
+    Pearson's r on the ranked scores (equivalent to Spearman's rho).
+    This measures how similarly two models *order* all text pairs by similarity,
+    independent of their absolute score scales.
+
+    Returns the correlation matrix as a DataFrame and prints a results table.
+    """
+    from scipy.stats import pearsonr
+
+    names = list(sim_lookup.keys())
+    n     = len(names)
+
+    # Extract and rank upper-triangle similarities for each model
+    ranked = {}
+    for name, sm in sim_lookup.items():
+        idx        = np.triu_indices_from(sm, k=1)
+        raw_scores = sm[idx]
+        ranked[name] = stats.rankdata(raw_scores)   # ascending rank
+
+    # Build Pearson r matrix on the ranked scores
+    r_mat = np.zeros((n, n))
+    p_mat = np.zeros((n, n))
+    for i, m1 in enumerate(names):
+        for j, m2 in enumerate(names):
+            r, p        = pearsonr(ranked[m1], ranked[m2])
+            r_mat[i, j] = r
+            p_mat[i, j] = p
+
+    # Heatmap
+    fig, ax = plt.subplots(figsize=(max(7, n * 1.1), max(6, n)))
+    sns.heatmap(r_mat, annot=True, fmt=".3f", cmap="coolwarm",
+                xticklabels=names, yticklabels=names,
+                vmin=-1, vmax=1, linewidths=0.5, linecolor="gray",
+                center=0, ax=ax)
+    ax.set_title(
+        f"Group {group_label} — Rank Correlation of Similarity Scores (Pearson r on ranked pairs)\n"
+        "r = 1: identical ordering, r = 0: uncorrelated, r = −1: reversed ordering",
+        fontsize=11, fontweight="bold")
+    plt.xticks(rotation=30, ha="right", fontsize=9)
+    plt.tight_layout()
+    path = f"{output_dir}/group{group_label}_rank_correlation.png"
+    plt.savefig(path, dpi=200, bbox_inches="tight")
+    plt.show()
+    print(f"Saved: {path}")
+
+    # Printed table (upper triangle only)
+    print(f"\nRANK CORRELATION MATRIX — Group {group_label}")
+    print(f"  (Pearson r on ranked pairwise similarity scores)")
+    print(f"  {'':22}", end="")
+    for name in names:
+        print(f"  {name:>14}", end="")
+    print()
+    print("  " + "-" * (22 + 16 * n))
+    for i, m1 in enumerate(names):
+        print(f"  {m1:<22}", end="")
+        for j, m2 in enumerate(names):
+            if j < i:
+                print(f"  {'':>14}", end="")
+            else:
+                sig = "*" if p_mat[i, j] < 0.05 else " "
+                print(f"  {r_mat[i, j]:>13.3f}{sig}", end="")
+        print()
+    print("  * p < .05")
+
+    return pd.DataFrame(r_mat, index=names, columns=names)
+
+
 def run_cross_model(model_results, sim_lookup, group_label, ref_key,
                     dist_title, n_cols=4):
-    """Run all three cross-model visualisations for one group."""
+    """Run all cross-model visualisations for one group."""
     names = list(model_results.keys())
+
+    # 0. Rank correlation — how similarly do models ORDER all pairs?
+    print(f"\n{'='*65}")
+    print(f"Group {group_label} — Rank Correlation of Pair Similarity Orderings")
+    print(f"{'='*65}")
+    rc_df = rank_correlation(sim_lookup, group_label)
 
     # 1. Jaccard overlap heatmaps (top and bottom)
     for which, idx in [("Top", 0), ("Bottom", 1)]:
@@ -569,18 +647,104 @@ save_pairs(top_A_bert, bot_A_bert, "A4_bert")
 
 ---
 
-## A5 — all-MiniLM-L6-v2
+## A5 — BERTweet
+
+**Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+BERTweet (`vinai/bertweet-base`) is a RoBERTa-based model pretrained on 850M English
+tweets. Its vocabulary and pretraining domain are oriented toward short, informal
+text — making it a meaningful contrast to `bert-base-uncased` (pretrained on books
+and Wikipedia) when applied to short individual MIMC descriptions. Max sequence
+length is 128 tokens. Like BERT, it is not fine-tuned for similarity, so embeddings
+are mean-pooled and compared via cosine similarity. Comparing A4 vs A5 isolates
+pretraining domain (formal vs informal text) while keeping architecture and
+similarity method constant.
+
+```{python a5-bertweet, echo=FALSE}
+print("=" * 65)
+print("A5 — BERTweet  (combMIMC_lvl1a)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_A_bertweet.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    we = st_models.Transformer("vinai/bertweet-base", max_seq_length=128)
+    pl = st_models.Pooling(we.get_word_embedding_dimension(),
+                            pooling_mode_mean_tokens=True)
+    m  = SentenceTransformer(modules=[we, pl])
+    emb = m.encode(df_comblvl1a["textMIMC_lvl1a"].tolist(), batch_size=32,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_A_bertweet = cosine_similarity(emb)
+pairs_A_bertweet            = build_pairs_df(sm_A_bertweet, df_comblvl1a,
+                                              "textMIMC_lvl1a", orig_col_comb)
+top_A_bertweet, bot_A_bertweet = top_bottom(pairs_A_bertweet)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_bertweet)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_bertweet)
+plot_pairs(top_A_bertweet, bot_A_bertweet,
+           "A5 — BERTweet (combMIMC_lvl1a)", "A5_bertweet")
+save_pairs(top_A_bertweet, bot_A_bertweet, "A5_bertweet")
+```
+
+---
+
+## A6 — paraphrase-MiniLM-L6-v2
+
+**Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+`paraphrase-MiniLM-L6-v2` shares the MiniLM-L6 architecture with A7 but is
+fine-tuned specifically on paraphrase pairs rather than general semantic similarity
+pairs. Comparing A6 vs A7 (MiniLM) isolates the effect of fine-tuning objective
+(paraphrase detection vs broad semantic similarity) while holding architecture
+constant. Comparing A6 vs A9 (paraphrase-mpnet) isolates the architecture effect
+within the paraphrase objective.
+
+```{python a6-para-minilm, echo=FALSE}
+print("=" * 65)
+print("A6 — paraphrase-MiniLM-L6-v2  (combMIMC_lvl1a)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_A_para_minilm.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/paraphrase-MiniLM-L6-v2")
+    m.max_seq_length = 128
+    emb = m.encode(df_comblvl1a["textMIMC_lvl1a"].tolist(), batch_size=64,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_A_para_minilm = cosine_similarity(emb)
+pairs_A_para_minilm              = build_pairs_df(sm_A_para_minilm, df_comblvl1a,
+                                                   "textMIMC_lvl1a", orig_col_comb)
+top_A_para_minilm, bot_A_para_minilm = top_bottom(pairs_A_para_minilm)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_A_para_minilm)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_para_minilm)
+plot_pairs(top_A_para_minilm, bot_A_para_minilm,
+           "A6 — paraphrase-MiniLM-L6-v2 (combMIMC_lvl1a)", "A6_para_minilm")
+save_pairs(top_A_para_minilm, bot_A_para_minilm, "A6_para_minilm")
+```
+
+---
+
+## A7 — all-MiniLM-L6-v2
 
 **Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
 
 Fine-tuned for semantic similarity on 1B+ sentence pairs. The embedding space is
 trained so cosine similarity directly reflects semantic closeness. Running on
 combMIMC shows whether similarity fine-tuning changes behaviour at document scale
-vs individual scale (compare A5 vs B5).
+vs individual scale (compare A7 vs B7).
 
-```{python a5-minilm, echo=FALSE}
+```{python a7-minilm, echo=FALSE}
 print("=" * 65)
-print("A5 — all-MiniLM-L6-v2  (combMIMC_lvl1a)")
+print("A7 — all-MiniLM-L6-v2  (combMIMC_lvl1a)")
 print("=" * 65)
 
 cache = f"{output_dir}/embeddings_A_minilm.npy"
@@ -602,22 +766,22 @@ top_A_minilm, bot_A_minilm = top_bottom(pairs_A_minilm)
 print(f"\nTOP {TOP_N}:"); print_pairs(top_A_minilm)
 print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_minilm)
 plot_pairs(top_A_minilm, bot_A_minilm,
-           "A5 — all-MiniLM-L6-v2 (combMIMC_lvl1a)", "A5_minilm")
-save_pairs(top_A_minilm, bot_A_minilm, "A5_minilm")
+           "A7 — all-MiniLM-L6-v2 (combMIMC_lvl1a)", "A7_minilm")
+save_pairs(top_A_minilm, bot_A_minilm, "A7_minilm")
 ```
 
 ---
 
-## A6 — all-mpnet-base-v2
+## A8 — all-mpnet-base-v2
 
 **Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
 
 Highest-quality general-purpose sentence-embedding model. 768-dimensional
 embeddings, max 512 tokens. Quality ceiling for the sentence-transformer family.
 
-```{python a6-mpnet, echo=FALSE}
+```{python a8-mpnet, echo=FALSE}
 print("=" * 65)
-print("A6 — all-mpnet-base-v2  (combMIMC_lvl1a)")
+print("A8 — all-mpnet-base-v2  (combMIMC_lvl1a)")
 print("=" * 65)
 
 cache = f"{output_dir}/embeddings_A_mpnet.npy"
@@ -639,22 +803,22 @@ top_A_mpnet, bot_A_mpnet = top_bottom(pairs_A_mpnet)
 print(f"\nTOP {TOP_N}:"); print_pairs(top_A_mpnet)
 print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_mpnet)
 plot_pairs(top_A_mpnet, bot_A_mpnet,
-           "A6 — all-mpnet-base-v2 (combMIMC_lvl1a)", "A6_mpnet")
-save_pairs(top_A_mpnet, bot_A_mpnet, "A6_mpnet")
+           "A8 — all-mpnet-base-v2 (combMIMC_lvl1a)", "A8_mpnet")
+save_pairs(top_A_mpnet, bot_A_mpnet, "A8_mpnet")
 ```
 
 ---
 
-## A7 — paraphrase-mpnet-base-v2
+## A9 — paraphrase-mpnet-base-v2
 
 **Data**: `combMIMC_lvl1a.csv`  |  **Preprocessing**: `lvl1a` (light)
 
 Fine-tuned for paraphrase detection — identifying when two sentences express the
 same meaning in different words. Closest analogue to the MIMC task objective.
 
-```{python a7-para, echo=FALSE}
+```{python a9-para, echo=FALSE}
 print("=" * 65)
-print("A7 — paraphrase-mpnet-base-v2  (combMIMC_lvl1a)")
+print("A9 — paraphrase-mpnet-base-v2  (combMIMC_lvl1a)")
 print("=" * 65)
 
 cache = f"{output_dir}/embeddings_A_para.npy"
@@ -676,8 +840,8 @@ top_A_para, bot_A_para = top_bottom(pairs_A_para)
 print(f"\nTOP {TOP_N}:"); print_pairs(top_A_para)
 print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_A_para)
 plot_pairs(top_A_para, bot_A_para,
-           "A7 — paraphrase-mpnet-base-v2 (combMIMC_lvl1a)", "A7_para")
-save_pairs(top_A_para, bot_A_para, "A7_para")
+           "A9 — paraphrase-mpnet-base-v2 (combMIMC_lvl1a)", "A9_para")
+save_pairs(top_A_para, bot_A_para, "A9_para")
 ```
 
 ---
@@ -690,27 +854,27 @@ the reference for the side-by-side heatmap as it is the most interpretable basel
 
 ```{python groupA-cross, echo=FALSE}
 model_results_A = {
-    "TF-IDF":       (top_A_tfidf,      bot_A_tfidf),
-    "W2V-lvl2a":    (top_A_w2v_lvl2a,  bot_A_w2v_lvl2a),
-    "W2V-lvl1a":    (top_A_w2v_lvl1a,  bot_A_w2v_lvl1a),
-    "BERT":         (top_A_bert,        bot_A_bert),
-    "MiniLM":       (top_A_minilm,      bot_A_minilm),
-    "mpnet":        (top_A_mpnet,       bot_A_mpnet),
-    "para-mpnet":   (top_A_para,        bot_A_para),
+    "TF-IDF":      (top_A_tfidf,       bot_A_tfidf),
+    "W2V-lvl2a":   (top_A_w2v_lvl2a,   bot_A_w2v_lvl2a),
+    "W2V-lvl1a":   (top_A_w2v_lvl1a,   bot_A_w2v_lvl1a),
+    "BERT":        (top_A_bert,        bot_A_bert),
+    "BERTweet":    (top_A_bertweet,    bot_A_bertweet),
+    "para-MiniLM": (top_A_para_minilm, bot_A_para_minilm),
+    "MiniLM":      (top_A_minilm,      bot_A_minilm),
+    "mpnet":       (top_A_mpnet,       bot_A_mpnet),
+    "para-mpnet":  (top_A_para,        bot_A_para),
 }
 
-# Note: TF-IDF and W2V-lvl2a use df_comblvl2a; W2V-lvl1a and sentence models use df_comblvl1a.
-# Both have N=64 with the same clip-context ordering, so the pair index (i,j) refers
-# to the same clip-context cell in both dataframes.
-# Scores are therefore directly lookup-able across models within Group A.
 groupA_sim_lookup = {
-    "TF-IDF":       sm_A_tfidf,
-    "W2V-lvl2a":    sm_A_w2v_lvl2a,
-    "W2V-lvl1a":    sm_A_w2v_lvl1a,
-    "BERT":         sm_A_bert,
-    "MiniLM":       sm_A_minilm,
-    "mpnet":        sm_A_mpnet,
-    "para-mpnet":   sm_A_para,
+    "TF-IDF":      sm_A_tfidf,
+    "W2V-lvl2a":   sm_A_w2v_lvl2a,
+    "W2V-lvl1a":   sm_A_w2v_lvl1a,
+    "BERT":        sm_A_bert,
+    "BERTweet":    sm_A_bertweet,
+    "para-MiniLM": sm_A_para_minilm,
+    "MiniLM":      sm_A_minilm,
+    "mpnet":       sm_A_mpnet,
+    "para-mpnet":  sm_A_para,
 }
 
 all_sims_A = run_cross_model(
@@ -855,16 +1019,96 @@ save_pairs(top_B_bert, bot_B_bert, "B4_bert")
 
 ---
 
-## B5 — all-MiniLM-L6-v2
+## B5 — BERTweet
 
 **Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
 
-Fine-tuned for semantic similarity. Comparing B4 vs B5 on identical inputs
+BERTweet pretrained on informal short text. At the individual level, where MIMC
+descriptions are short and conversational, the domain match is more relevant than
+at the combMIMC level. Comparing B4 vs B5 isolates pretraining domain while holding
+architecture constant at the individual scale.
+
+```{python b5-bertweet, echo=FALSE}
+print("=" * 65)
+print("B5 — BERTweet  (individual)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_B_bertweet.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    we = st_models.Transformer("vinai/bertweet-base", max_seq_length=128)
+    pl = st_models.Pooling(we.get_word_embedding_dimension(),
+                            pooling_mode_mean_tokens=True)
+    m  = SentenceTransformer(modules=[we, pl])
+    emb = m.encode(df_indiv["textMIMC_lvl1a"].tolist(), batch_size=32,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_B_bertweet = cosine_similarity(emb)
+pairs_B_bertweet              = build_pairs_df(sm_B_bertweet, df_indiv,
+                                                "textMIMC_lvl1a", orig_col_indiv)
+top_B_bertweet, bot_B_bertweet = top_bottom(pairs_B_bertweet)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_bertweet)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_bertweet)
+plot_pairs(top_B_bertweet, bot_B_bertweet,
+           "B5 — BERTweet (individual)", "B5_bertweet")
+save_pairs(top_B_bertweet, bot_B_bertweet, "B5_bertweet")
+```
+
+---
+
+## B6 — paraphrase-MiniLM-L6-v2
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Paraphrase-tuned variant of MiniLM. At the individual level, different participants
+describing the same mental experience in different words is precisely a paraphrase
+task. Comparing B6 vs B7 (all-MiniLM) isolates fine-tuning objective within the
+same architecture on identical individual-level inputs.
+
+```{python b6-para-minilm, echo=FALSE}
+print("=" * 65)
+print("B6 — paraphrase-MiniLM-L6-v2  (individual)")
+print("=" * 65)
+
+cache = f"{output_dir}/embeddings_B_para_minilm.npy"
+if os.path.exists(cache):
+    emb = np.load(cache); print(f"Loaded from cache: {emb.shape}")
+else:
+    m = SentenceTransformer("sentence-transformers/paraphrase-MiniLM-L6-v2")
+    m.max_seq_length = 128
+    emb = m.encode(df_indiv["textMIMC_lvl1a"].tolist(), batch_size=64,
+                   show_progress_bar=True, convert_to_numpy=True,
+                   normalize_embeddings=True)
+    np.save(cache, emb); print(f"Saved: {cache}")
+
+sm_B_para_minilm = cosine_similarity(emb)
+pairs_B_para_minilm                = build_pairs_df(sm_B_para_minilm, df_indiv,
+                                                     "textMIMC_lvl1a", orig_col_indiv)
+top_B_para_minilm, bot_B_para_minilm = top_bottom(pairs_B_para_minilm)
+
+print(f"\nTOP {TOP_N}:"); print_pairs(top_B_para_minilm)
+print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_para_minilm)
+plot_pairs(top_B_para_minilm, bot_B_para_minilm,
+           "B6 — paraphrase-MiniLM-L6-v2 (individual)", "B6_para_minilm")
+save_pairs(top_B_para_minilm, bot_B_para_minilm, "B6_para_minilm")
+```
+
+---
+
+## B7 — all-MiniLM-L6-v2
+
+**Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
+
+Fine-tuned for semantic similarity. Comparing B4 vs B7 on identical inputs
 isolates the effect of similarity fine-tuning at the individual level.
 
-```{python b5-minilm, echo=FALSE}
+```{python b7-minilm, echo=FALSE}
 print("=" * 65)
-print("B5 — all-MiniLM-L6-v2  (individual)")
+print("B7 — all-MiniLM-L6-v2  (individual)")
 print("=" * 65)
 
 cache = f"{output_dir}/embeddings_B_minilm.npy"
@@ -886,21 +1130,21 @@ top_B_minilm, bot_B_minilm = top_bottom(pairs_B_minilm)
 print(f"\nTOP {TOP_N}:"); print_pairs(top_B_minilm)
 print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_minilm)
 plot_pairs(top_B_minilm, bot_B_minilm,
-           "B5 — all-MiniLM-L6-v2 (individual)", "B5_minilm")
-save_pairs(top_B_minilm, bot_B_minilm, "B5_minilm")
+           "B7 — all-MiniLM-L6-v2 (individual)", "B7_minilm")
+save_pairs(top_B_minilm, bot_B_minilm, "B7_minilm")
 ```
 
 ---
 
-## B6 — all-mpnet-base-v2
+## B8 — all-mpnet-base-v2
 
 **Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
 
 Quality ceiling for the individual-level sentence-embedding models.
 
-```{python b6-mpnet, echo=FALSE}
+```{python b8-mpnet, echo=FALSE}
 print("=" * 65)
-print("B6 — all-mpnet-base-v2  (individual)")
+print("B8 — all-mpnet-base-v2  (individual)")
 print("=" * 65)
 
 cache = f"{output_dir}/embeddings_B_mpnet.npy"
@@ -922,13 +1166,13 @@ top_B_mpnet, bot_B_mpnet = top_bottom(pairs_B_mpnet)
 print(f"\nTOP {TOP_N}:"); print_pairs(top_B_mpnet)
 print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_mpnet)
 plot_pairs(top_B_mpnet, bot_B_mpnet,
-           "B6 — all-mpnet-base-v2 (individual)", "B6_mpnet")
-save_pairs(top_B_mpnet, bot_B_mpnet, "B6_mpnet")
+           "B8 — all-mpnet-base-v2 (individual)", "B8_mpnet")
+save_pairs(top_B_mpnet, bot_B_mpnet, "B8_mpnet")
 ```
 
 ---
 
-## B7 — paraphrase-mpnet-base-v2
+## B9 — paraphrase-mpnet-base-v2
 
 **Data**: `dataMIMC_preprocessed.csv`  |  **Preprocessing**: `lvl1a` (light)
 
@@ -936,9 +1180,9 @@ Fine-tuned for paraphrase detection. At the individual level, the paraphrase
 objective is especially relevant — different participants describing the same
 experience in their own words is structurally a paraphrase task.
 
-```{python b7-para, echo=FALSE}
+```{python b9-para, echo=FALSE}
 print("=" * 65)
-print("B7 — paraphrase-mpnet-base-v2  (individual)")
+print("B9 — paraphrase-mpnet-base-v2  (individual)")
 print("=" * 65)
 
 cache = f"{output_dir}/embeddings_B_para.npy"
@@ -960,8 +1204,8 @@ top_B_para, bot_B_para = top_bottom(pairs_B_para)
 print(f"\nTOP {TOP_N}:"); print_pairs(top_B_para)
 print(f"\nBOTTOM {TOP_N}:"); print_pairs(bot_B_para)
 plot_pairs(top_B_para, bot_B_para,
-           "B7 — paraphrase-mpnet-base-v2 (individual)", "B7_para")
-save_pairs(top_B_para, bot_B_para, "B7_para")
+           "B9 — paraphrase-mpnet-base-v2 (individual)", "B9_para")
+save_pairs(top_B_para, bot_B_para, "B9_para")
 ```
 
 ---
@@ -974,29 +1218,33 @@ lexical-vs-semantic contrast (B1/B2 vs B4/B5) are both immediately visible.
 
 ```{python groupB-cross, echo=FALSE}
 model_results_B = {
-    "TF-IDF":       (top_B_tfidf,      bot_B_tfidf),
-    "W2V-lvl2a":    (top_B_w2v_lvl2a,  bot_B_w2v_lvl2a),
-    "W2V-lvl1a":    (top_B_w2v_lvl1a,  bot_B_w2v_lvl1a),
-    "BERT":         (top_B_bert,        bot_B_bert),
-    "MiniLM":       (top_B_minilm,      bot_B_minilm),
-    "mpnet":        (top_B_mpnet,       bot_B_mpnet),
-    "para-mpnet":   (top_B_para,        bot_B_para),
+    "TF-IDF":      (top_B_tfidf,       bot_B_tfidf),
+    "W2V-lvl2a":   (top_B_w2v_lvl2a,   bot_B_w2v_lvl2a),
+    "W2V-lvl1a":   (top_B_w2v_lvl1a,   bot_B_w2v_lvl1a),
+    "BERT":        (top_B_bert,        bot_B_bert),
+    "BERTweet":    (top_B_bertweet,    bot_B_bertweet),
+    "para-MiniLM": (top_B_para_minilm, bot_B_para_minilm),
+    "MiniLM":      (top_B_minilm,      bot_B_minilm),
+    "mpnet":       (top_B_mpnet,       bot_B_mpnet),
+    "para-mpnet":  (top_B_para,        bot_B_para),
 }
 
 groupB_sim_lookup = {
-    "TF-IDF":       sm_B_tfidf,
-    "W2V-lvl2a":    sm_B_w2v_lvl2a,
-    "W2V-lvl1a":    sm_B_w2v_lvl1a,
-    "BERT":         sm_B_bert,
-    "MiniLM":       sm_B_minilm,
-    "mpnet":        sm_B_mpnet,
-    "para-mpnet":   sm_B_para,
+    "TF-IDF":      sm_B_tfidf,
+    "W2V-lvl2a":   sm_B_w2v_lvl2a,
+    "W2V-lvl1a":   sm_B_w2v_lvl1a,
+    "BERT":        sm_B_bert,
+    "BERTweet":    sm_B_bertweet,
+    "para-MiniLM": sm_B_para_minilm,
+    "MiniLM":      sm_B_minilm,
+    "mpnet":       sm_B_mpnet,
+    "para-mpnet":  sm_B_para,
 }
 
 all_sims_B = run_cross_model(
     model_results_B, groupB_sim_lookup,
     group_label="B",
-    ref_key="BERT",
+    ref_key="MiniLM",
     dist_title="Group B — Similarity Distributions  (individual MIMC responses)",
     n_cols=4,
 )
@@ -1007,7 +1255,7 @@ all_sims_B = run_cross_model(
 ## Summary
 
 ```{python summary, echo=FALSE}
-print("FULL MODEL COMPARISON SUMMARY  (6 models × 2 data levels)")
+print("FULL MODEL COMPARISON SUMMARY  (9 models × 2 data levels)")
 print("=" * 80)
 print(f"\nGroup A: {len(df_comblvl1a)} combMIMC documents  |  "
       f"Group B: {len(df_indiv)} individual responses  |  "
@@ -1020,13 +1268,15 @@ print(f"  {'':<16} {'':<8}  {'Mean':>6} {'SD':>6} {'Min':>6} {'Max':>6}  "
 print("  " + "-" * 82)
 
 rows = [
-    ("TF-IDF",     "lvl2a", all_sims_A["TF-IDF"],    all_sims_B["TF-IDF"]),
-    ("W2V",        "lvl2a", all_sims_A["W2V-lvl2a"], all_sims_B["W2V-lvl2a"]),
-    ("W2V",        "lvl1a", all_sims_A["W2V-lvl1a"], all_sims_B["W2V-lvl1a"]),
-    ("BERT",       "lvl1a", all_sims_A["BERT"],       all_sims_B["BERT"]),
-    ("MiniLM",     "lvl1a", all_sims_A["MiniLM"],     all_sims_B["MiniLM"]),
-    ("mpnet",      "lvl1a", all_sims_A["mpnet"],       all_sims_B["mpnet"]),
-    ("para-mpnet", "lvl1a", all_sims_A["para-mpnet"], all_sims_B["para-mpnet"]),
+    ("TF-IDF",      "lvl2a", all_sims_A["TF-IDF"],      all_sims_B["TF-IDF"]),
+    ("W2V",         "lvl2a", all_sims_A["W2V-lvl2a"],   all_sims_B["W2V-lvl2a"]),
+    ("W2V",         "lvl1a", all_sims_A["W2V-lvl1a"],   all_sims_B["W2V-lvl1a"]),
+    ("BERT",        "lvl1a", all_sims_A["BERT"],        all_sims_B["BERT"]),
+    ("BERTweet",    "lvl1a", all_sims_A["BERTweet"],    all_sims_B["BERTweet"]),
+    ("para-MiniLM", "lvl1a", all_sims_A["para-MiniLM"], all_sims_B["para-MiniLM"]),
+    ("MiniLM",      "lvl1a", all_sims_A["MiniLM"],      all_sims_B["MiniLM"]),
+    ("mpnet",       "lvl1a", all_sims_A["mpnet"],       all_sims_B["mpnet"]),
+    ("para-mpnet",  "lvl1a", all_sims_A["para-mpnet"],  all_sims_B["para-mpnet"]),
 ]
 for name, prep, sA, sB in rows:
     print(f"  {name:<16} {prep:<8}  "
@@ -1034,8 +1284,9 @@ for name, prep, sA, sB in rows:
           f"{sB.mean():>6.3f} {sB.std():>6.3f} {sB.min():>6.3f} {sB.max():>6.3f}")
 
 print(f"\nOutputs saved to: {output_dir}")
-print("  pairs_top/bottom_<ID>.csv — pair lists for each of the 14 model runs")
+print("  pairs_top/bottom_<ID>.csv — pair lists for each of the 18 model runs")
 print("  pairs_<ID>.png            — bar charts")
+print("  groupA/B_rank_correlation.png     — Pearson r on ranked pair orderings")
 print("  groupA/B_jaccard_top/bottom.png   — agreement heatmaps")
 print("  groupA/B_distributions.png        — score distributions")
 print("  groupA/B_cross_model_heatmap.png  — side-by-side score heatmaps")

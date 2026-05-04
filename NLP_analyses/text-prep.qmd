@@ -268,7 +268,7 @@ print(dataMIMC.groupby('context_word')['word_count']
 
 Different NLP models require different levels of text filtering to perform optimally.
 
-**BERT** — Benefits from minimal preprocessing because:
+**Sentence Embedding** — Benefits from minimal preprocessing because:
 
 - Understands context and handles common words well
 - Has its own tokenisation and handles word variations
@@ -392,7 +392,7 @@ These are words we will remove from the text that won't be accounted for in anal
 
 We will define custom domain-specific stop words (e.g. music style, context cues, thought types), and get NLTK common English-language stop words.
 
-Both preprocessing levels will have custom stop words removed, but only level 2 preprocessing for TF-IDF will has the NLTK stop words removed (as BERT understands "the", "is", "and", etc.).
+Both preprocessing levels will have custom stop words removed, but only level 2 preprocessing for TF-IDF will has the NLTK stop words removed (as Sentence Embedding understands "the", "is", "and", etc.).
 
 ```{python}
 # Define custom stop words (domain-specific terms to remove)
@@ -433,7 +433,7 @@ Lemmatising groups inflected word forms together by identifying the dictionary f
 
 [*e.g., improve/improving/improvements/improved/improver = improve*]
 
-Only level 2 preprocessing for TF-IDF will have lemmatisation (BERT is able to handle word variations).
+Only level 2 preprocessing for TF-IDF will have lemmatisation (Sentence Embedding is able to handle word variations).
 
 ```{python}
 # Initialise lemmatiser and tag mapping
@@ -448,7 +448,7 @@ tag_map['R'] = wn.ADV
 
 ### Apply text preprocessing
 
-**LEVEL 1:** Minimal preprocessing for BERT, only removing custom stop words from spell-checked MIMC descriptions.
+**LEVEL 1:** Minimal preprocessing for Sentence Embedding, only removing custom stop words from spell-checked MIMC descriptions.
 
 **LEVEL 2:** Aggressive preprocessing for TF-IDF, removing custom stop words, NLTK stop words, lemmatising, converting to lowercase, and removing punctuation from the spell-checked MIMC descriptions.
 
@@ -458,10 +458,10 @@ def to_list(arg):
 
 def preprocessing_lvl1a(text, stimuli_stop_words, thought_stop_words):
     """
-    Level 1a: Minimal preprocessing for BERT
+    Level 1a: Minimal preprocessing for Sentence Embedding
     - Only removes custom domain-specific stop words
     - Preserves original word forms (no lemmatisation)
-    - Keeps punctuation and capitalization for BERT's tokeniser
+    - Keeps punctuation and capitalization for Sentence Embedding's tokeniser
     """
     if isinstance(text, str):
         custom_stop_words = set(to_list(stimuli_stop_words) + to_list(thought_stop_words))
@@ -537,7 +537,7 @@ def preprocessing_lvl2b(text, stimuli_stop_words, nltk_stop_words, lemmatiser, t
     return text
 
 
-# Apply Level 1a preprocessing (for BERT)
+# Apply Level 1a preprocessing (for Sentence Embedding)
 dataMIMC['textMIMC_lvl1a'] = dataMIMC['descr_THOUGHT.text_spellchecked'].apply(
     lambda x: preprocessing_lvl1a(x, customStopWords, thoughtStopWords)
 )
@@ -569,8 +569,8 @@ print(dataMIMC[['descr_THOUGHT.text',
 dataMIMC.to_csv(f'{base_path}/NLP_outputs/dataMIMC_preprocessed.csv', encoding='utf-8')
 
 print("\nPreprocessing complete")
-print("- 'textMIMC_lvl1a': Minimal filtering for BERT (custom stop words only)")
-print("- 'textMIMC_lvl1b': Minimal filtering for BERT (stimuli stop words only)")
+print("- 'textMIMC_lvl1a': Minimal filtering for Sentence Embedding (custom stop words only)")
+print("- 'textMIMC_lvl1b': Minimal filtering for Sentence Embedding (stimuli stop words only)")
 print("- 'textMIMC_lvl2a': Full preprocessing for TF-IDF (all stop words + lemmatisation)")
 print("- 'textMIMC_lvl2b': Full preprocessing for TF-IDF (stimuli+NLTK stop words + lemmatisation)")
 ```

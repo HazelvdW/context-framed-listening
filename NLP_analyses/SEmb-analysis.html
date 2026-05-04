@@ -94,6 +94,14 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#sentence-embeddings" id="toc-sentence-embeddings" class="nav-link" data-scroll-target="#sentence-embeddings">Sentence Embeddings</a></li>
   <li><a href="#pairwise-similarity-by-condition" id="toc-pairwise-similarity-by-condition" class="nav-link" data-scroll-target="#pairwise-similarity-by-condition">Pairwise Similarity by Condition</a></li>
   </ul></li>
+  <li><a href="#linear-mixed-models" id="toc-linear-mixed-models" class="nav-link" data-scroll-target="#linear-mixed-models">Linear Mixed Models</a>
+  <ul class="collapse">
+  <li><a href="#lmm-setup-prep" id="toc-lmm-setup-prep" class="nav-link" data-scroll-target="#lmm-setup-prep">LMM setup &amp; prep</a></li>
+  <li><a href="#lmm-models" id="toc-lmm-models" class="nav-link" data-scroll-target="#lmm-models">LMM Models</a></li>
+  <li><a href="#estimated-marginal-means" id="toc-estimated-marginal-means" class="nav-link" data-scroll-target="#estimated-marginal-means">Estimated Marginal Means</a></li>
+  <li><a href="#random-forest" id="toc-random-forest" class="nav-link" data-scroll-target="#random-forest">Random Forest</a></li>
+  <li><a href="#linear-discriminant-analysis" id="toc-linear-discriminant-analysis" class="nav-link" data-scroll-target="#linear-discriminant-analysis">Linear Discriminant Analysis</a></li>
+  </ul></li>
   <li><a href="#rq1-does-context-shape-mimc-similarity" id="toc-rq1-does-context-shape-mimc-similarity" class="nav-link" data-scroll-target="#rq1-does-context-shape-mimc-similarity">RQ1 — Does Context Shape MIMC Similarity?</a>
   <ul class="collapse">
   <li><a href="#omnibus-test" id="toc-omnibus-test" class="nav-link" data-scroll-target="#omnibus-test">Omnibus Test</a></li>
@@ -194,7 +202,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </table>
 <p>At the individual level, each row is one participant’s MIMC description for one clip × context cell. This means <code>Sclip_Scontext</code> pairs (same clip, same context, different participants) now exist and are fully populated, enabling RQ2b (combined alignment advantage) to be tested for the first time in the pipeline.</p>
 <p><strong>Model selection note</strong>: <code>all-MiniLM-L6-v2</code> is used as the default model. It was fine-tuned specifically for semantic similarity on diverse sentence-level text and performs strongly on short inputs (3–128 tokens), matching the short length of individual MIMC descriptions. The model name is set in a single config variable below and can be swapped without modifying any other code — see the model comparison note in the setup section for alternatives including mpnet.</p>
-<p>Analyses mirror the combMIMC pipeline in structure, conditions, and research questions exactly.</p>
+<p>Analyses mirror the aggregated combMIMC pipeline in structure, conditions, and research questions exactly.</p>
 <hr>
 <section id="setup" class="level2">
 <h2 class="anchored" data-anchor-id="setup">Setup</h2>
@@ -240,48 +248,22 @@ All package versions OK.</code></pre>
 </div>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
-<pre><code>Model:            sentence-transformers/all-MiniLM-L6-v2</code></pre>
+<pre><code>Model:           sentence-transformers/all-MiniLM-L6-v2</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Slug:             all-MiniLM-L6-v2</code></pre>
+<pre><code>Slug:            all-MiniLM-L6-v2</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Max seq length:   128</code></pre>
+<pre><code>Max seq length:  128</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Native ST model:  True</code></pre>
+<pre><code>Native ST model: True</code></pre>
 </div>
 </div>
 <hr>
 </section>
 <section id="helper-functions" class="level2">
 <h2 class="anchored" data-anchor-id="helper-functions">Helper Functions</h2>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> sig_marker(p):</span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">"""Return significance marker string for a p-value."""</span></span>
-<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> p <span class="op">&lt;</span> <span class="fl">0.001</span>: <span class="cf">return</span> <span class="st">"***"</span></span>
-<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> p <span class="op">&lt;</span> <span class="fl">0.01</span>:  <span class="cf">return</span> <span class="st">"**"</span></span>
-<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> p <span class="op">&lt;</span> <span class="fl">0.05</span>:  <span class="cf">return</span> <span class="st">"*"</span></span>
-<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="st">"n.s."</span></span>
-<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> welch_t(g1, g2):</span>
-<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>    <span class="co">"""Welch's t-test with Welch-Satterthwaite degrees of freedom.</span></span>
-<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a><span class="co">    Returns (t, p, df)."""</span></span>
-<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>    n1, n2 <span class="op">=</span> <span class="bu">len</span>(g1), <span class="bu">len</span>(g2)</span>
-<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>    v1, v2 <span class="op">=</span> g1.var(ddof<span class="op">=</span><span class="dv">1</span>), g2.var(ddof<span class="op">=</span><span class="dv">1</span>)</span>
-<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a>    se     <span class="op">=</span> np.sqrt(v1<span class="op">/</span>n1 <span class="op">+</span> v2<span class="op">/</span>n2)</span>
-<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a>    t      <span class="op">=</span> (g1.mean() <span class="op">-</span> g2.mean()) <span class="op">/</span> se</span>
-<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a>    df     <span class="op">=</span> (v1<span class="op">/</span>n1 <span class="op">+</span> v2<span class="op">/</span>n2)<span class="op">**</span><span class="dv">2</span> <span class="op">/</span> ((v1<span class="op">/</span>n1)<span class="op">**</span><span class="dv">2</span><span class="op">/</span>(n1<span class="op">-</span><span class="dv">1</span>) <span class="op">+</span> (v2<span class="op">/</span>n2)<span class="op">**</span><span class="dv">2</span><span class="op">/</span>(n2<span class="op">-</span><span class="dv">1</span>))</span>
-<span id="cb13-17"><a href="#cb13-17" aria-hidden="true" tabindex="-1"></a>    p      <span class="op">=</span> <span class="dv">2</span> <span class="op">*</span> (<span class="dv">1</span> <span class="op">-</span> stats.t.cdf(<span class="bu">abs</span>(t), df))</span>
-<span id="cb13-18"><a href="#cb13-18" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="bu">float</span>(t), <span class="bu">float</span>(p), <span class="bu">float</span>(df)</span>
-<span id="cb13-19"><a href="#cb13-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-20"><a href="#cb13-20" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-21"><a href="#cb13-21" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> cohens_d(g1, g2):</span>
-<span id="cb13-22"><a href="#cb13-22" aria-hidden="true" tabindex="-1"></a>    <span class="co">"""Compute Cohen's d effect size."""</span></span>
-<span id="cb13-23"><a href="#cb13-23" aria-hidden="true" tabindex="-1"></a>    pooled <span class="op">=</span> np.sqrt((g1.std()<span class="op">**</span><span class="dv">2</span> <span class="op">+</span> g2.std()<span class="op">**</span><span class="dv">2</span>) <span class="op">/</span> <span class="dv">2</span>)</span>
-<span id="cb13-24"><a href="#cb13-24" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="bu">float</span>((g1.mean() <span class="op">-</span> g2.mean()) <span class="op">/</span> pooled) <span class="cf">if</span> pooled <span class="op">&gt;</span> <span class="dv">0</span> <span class="cf">else</span> np.nan</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
 <hr>
 </section>
 <section id="data-preparation" class="level2">
@@ -291,17 +273,17 @@ All package versions OK.</code></pre>
 <p>Load <strong><code>dataMIMC_preprocessed.csv</code></strong> — individual-level preprocessed MIMC descriptions, one row per participant × clip × context observation.</p>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
-<pre><code>Dropped 2 rows with missing textMIMC_lvl1a</code></pre>
+<pre><code>Dropped 2 rows with missing textMIMC_lvl1b</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Shape:   (1960, 33)</code></pre>
+<pre><code>Shape:   (1960, 34)</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Columns: ['Unnamed: 0', 'clip_name', 'clip_genre', 'context_word', 'clip_context_PAIR', 'expName', 'PROLIFIC_PID', 'File_ID', 'date', 'descr_THOUGHT.text', 'rating_music_prompted.response', 'rating_spontaneity.response', 'rating_novelty.response', 'rating_familiarity.response', 'rating_enjoyment.response', 'demographics.headphones', 'demographics.age', 'demographics.gender', 'demographics.livingCountry', 'demographics.birthCountry', 'demographics.nativeLanguage', 'demographics.otherLanguage', 'demographics.otherLanguageText', 'demographics.hearingImpariments', 'demographics.hearingImpairmentsText', 'demographics.education', 'demographics.musicianIdentification', 'demographics.feedback', 'descr_THOUGHT.text_spellchecked', 'textMIMC_lvl1a', 'textMIMC_lvl1b', 'textMIMC_lvl2a', 'textMIMC_lvl2b']</code></pre>
+<pre><code>Columns: ['Unnamed: 0', 'clip_name', 'clip_genre', 'context_word', 'clip_context_PAIR', 'expName', 'PROLIFIC_PID', 'File_ID', 'date', 'descr_THOUGHT.text', 'rating_music_prompted.response', 'rating_spontaneity.response', 'rating_novelty.response', 'rating_familiarity.response', 'rating_enjoyment.response', 'demographics.headphones', 'demographics.age', 'demographics.gender', 'demographics.livingCountry', 'demographics.birthCountry', 'demographics.nativeLanguage', 'demographics.otherLanguage', 'demographics.otherLanguageText', 'demographics.hearingImpariments', 'demographics.hearingImpairmentsText', 'demographics.education', 'demographics.musicianIdentification', 'demographics.feedback', 'word_count', 'descr_THOUGHT.text_spellchecked', 'textMIMC_lvl1a', 'textMIMC_lvl1b', 'textMIMC_lvl2a', 'textMIMC_lvl2b']</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>
-Unique clips:    ['80s_LOW_02', '80s_LOW_06', '80s_MED_08', '80s_MED_13', 'Ele_LOW_09', 'Ele_LOW_14', 'Ele_MED_19', 'Ele_MED_20', 'Jaz_LOW_19', 'Jaz_LOW_21', 'Jaz_MED_02', 'Jaz_MED_07', 'Met_LOW_09', 'Met_LOW_14', 'Met_MED_19', 'Met_MED_20']</code></pre>
+Unique clips:  ['80s_LOW_02', '80s_LOW_06', '80s_MED_08', '80s_MED_13', 'Ele_LOW_09', 'Ele_LOW_14', 'Ele_MED_19', 'Ele_MED_20', 'Jaz_LOW_19', 'Jaz_LOW_21', 'Jaz_MED_02', 'Jaz_MED_07', 'Met_LOW_09', 'Met_LOW_14', 'Met_MED_19', 'Met_MED_20']</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Unique contexts: ['bar', 'concert', 'movie', 'videogame']</code></pre>
@@ -321,13 +303,13 @@ Text length (words):</code></pre>
 <pre><code>  Min:    1</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>  Median: 17</code></pre>
+<pre><code>  Median: 18</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>  Mean:   20.1</code></pre>
+<pre><code>  Mean:   21.4</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>  Max:    100</code></pre>
+<pre><code>  Max:    101</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Texts &gt; 128 tokens (approx): 1  (word count is a rough proxy for token count)</code></pre>
@@ -335,11 +317,11 @@ Text length (words):</code></pre>
 <div class="cell-output cell-output-stdout">
 <pre><code>   Unnamed: 0  ... text_len_words
 0           0  ...             10
-1           1  ...             33
+1           1  ...             38
 2           2  ...              8
 3           3  ...             14
 
-[4 rows x 34 columns]</code></pre>
+[4 rows x 35 columns]</code></pre>
 </div>
 </div>
 </section>
@@ -421,7 +403,1675 @@ Sclip_Scontext             29320</code></pre>
 Saved similarity data</code></pre>
 </div>
 </div>
-<hr>
+</section>
+</section>
+<section id="linear-mixed-models" class="level2">
+<h2 class="anchored" data-anchor-id="linear-mixed-models">Linear Mixed Models</h2>
+<p>Linear mixed models (LMMs) provide a complementary, model-based approach to the pairwise t-tests above. The outcome is pairwise cosine similarity; fixed effects are <code>context_comb</code> (the context labels from the pair) and <code>genre_comb</code> (the genres of items in the pair); <code>item_i</code> and <code>item_j</code> are included as a random intercept to account for the fact that each individual response appears in multiple pairs.</p>
+<p>Three models are fitted in sequence. Model 1 tests main effects of context, genre, and clip — clip is included as both a fixed and random effect to separate clip-specific idiosyncrasies from the genre signal, since genre is fully nested within clip. Model 2 adds mean believability (from the supplementary study) as a covariate at the clip × context cell level (64 unique values, one per clip–context pairing) — this gives genuine within-context variation in believability and avoids the collinearity that would arise from collapsing to context-level means. Model 3 tests the context × genre interaction while retaining clip as a covariate. Model comparisons use likelihood ratio tests (ANOVA on nested models) to determine whether each additional term improves fit.</p>
+<p>Following the LMMs, estimated marginal means (emmeans) unpack pairwise context differences while controlling for genre. Finally, a Random Forest classifier and a Linear Discriminant Analysis (LDA) are used to assess how well context condition can be recovered from similarity scores alone.</p>
+<section id="lmm-setup-prep" class="level3">
+<h3 class="anchored" data-anchor-id="lmm-setup-prep">LMM setup &amp; prep</h3>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb34"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="co"># ── Packages ──────────────────────────────────────────────────────────────────</span></span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a>required <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"lme4"</span>, <span class="st">"lmerTest"</span>, <span class="st">"MuMIn"</span>, <span class="st">"emmeans"</span>,</span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a>              <span class="st">"randomForest"</span>, <span class="st">"MASS"</span>, <span class="st">"dplyr"</span>, <span class="st">"ggplot2"</span>)</span>
+<span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (pkg <span class="cf">in</span> required) {</span>
+<span id="cb34-5"><a href="#cb34-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="sc">!</span><span class="fu">requireNamespace</span>(pkg, <span class="at">quietly =</span> <span class="cn">TRUE</span>))</span>
+<span id="cb34-6"><a href="#cb34-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">install.packages</span>(pkg, <span class="at">repos =</span> <span class="st">"https://cloud.r-project.org"</span>)</span>
+<span id="cb34-7"><a href="#cb34-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">library</span>(pkg, <span class="at">character.only =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb34-8"><a href="#cb34-8" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Loading required package: Matrix</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'lmerTest'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:lme4':
+
+    lmer</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:stats':
+
+    step</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Welcome to emmeans.
+Caution: You lose important information if you filter this package's results.
+See '? untidy'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>randomForest 4.7-1.2</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Type rfNews() to see new features/changes/bug fixes.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'randomForest'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:MuMIn':
+
+    importance</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'dplyr'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:MASS':
+
+    select</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:randomForest':
+
+    combine</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:stats':
+
+    filter, lag</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:base':
+
+    intersect, setdiff, setequal, union</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'ggplot2'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:randomForest':
+
+    margin</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb51"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="co"># ── Paths (inherit from Python session via reticulate base_path) ──────────────</span></span>
+<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a>base_path  <span class="ot">&lt;-</span> <span class="fu">paste0</span>(</span>
+<span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"/Users/hazelaileenvanderwalle/Library/CloudStorage/"</span>,</span>
+<span id="cb51-4"><a href="#cb51-4" aria-hidden="true" tabindex="-1"></a>  <span class="st">"OneDrive-Personal/work/study/PhD/_PROJECT/"</span>,</span>
+<span id="cb51-5"><a href="#cb51-5" aria-hidden="true" tabindex="-1"></a>  <span class="st">"_framedListening_NLP/context-framed-listening"</span></span>
+<span id="cb51-6"><a href="#cb51-6" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb51-7"><a href="#cb51-7" aria-hidden="true" tabindex="-1"></a>output_dir <span class="ot">&lt;-</span> <span class="fu">file.path</span>(base_path, <span class="st">"NLP_outputs"</span>, <span class="st">"SentenceEmbedding"</span>)</span>
+<span id="cb51-8"><a href="#cb51-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb51-9"><a href="#cb51-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Load pairwise similarity data (written by the Python chunk above)</span></span>
+<span id="cb51-10"><a href="#cb51-10" aria-hidden="true" tabindex="-1"></a><span class="co"># MODEL_SLUG is set in the Python session — use the same name here</span></span>
+<span id="cb51-11"><a href="#cb51-11" aria-hidden="true" tabindex="-1"></a>model_slug  <span class="ot">&lt;-</span> py<span class="sc">$</span>MODEL_SLUG   <span class="co"># pulls MODEL_SLUG from the Python environment</span></span>
+<span id="cb51-12"><a href="#cb51-12" aria-hidden="true" tabindex="-1"></a>sim_df_path <span class="ot">&lt;-</span> <span class="fu">file.path</span>(output_dir,</span>
+<span id="cb51-13"><a href="#cb51-13" aria-hidden="true" tabindex="-1"></a>                         <span class="fu">paste0</span>(<span class="st">"similarity_by_condition_"</span>,model_slug,<span class="st">".csv"</span>))</span>
+<span id="cb51-14"><a href="#cb51-14" aria-hidden="true" tabindex="-1"></a>sim_df      <span class="ot">&lt;-</span> <span class="fu">read.csv</span>(sim_df_path, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb51-15"><a href="#cb51-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb51-16"><a href="#cb51-16" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Loaded similarity data:"</span>, <span class="fu">nrow</span>(sim_df), <span class="st">"pairs</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Loaded similarity data: 1919820 pairs</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Columns:"</span>, <span class="fu">paste</span>(<span class="fu">names</span>(sim_df), <span class="at">collapse =</span> <span class="st">", "</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Columns: item_i, item_j, similarity, same_clip, same_context, same_genre, condition, clip_i, clip_j, context_i, context_j, genre_i, genre_j </code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb55"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Using sum-to-zero (effects) coding so no reference level is used —</span></span>
+<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a><span class="co"># each coefficient represents deviation from the grand mean,</span></span>
+<span id="cb55-3"><a href="#cb55-3" aria-hidden="true" tabindex="-1"></a><span class="co"># anova() gives Type III tests for each level independently</span></span>
+<span id="cb55-4"><a href="#cb55-4" aria-hidden="true" tabindex="-1"></a><span class="fu">options</span>(<span class="at">contrasts =</span> <span class="fu">c</span>(<span class="st">"contr.sum"</span>, <span class="st">"contr.poly"</span>))</span>
+<span id="cb55-5"><a href="#cb55-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-6"><a href="#cb55-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Define similarity pair combination variables</span></span>
+<span id="cb55-7"><a href="#cb55-7" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>genre_comb   <span class="ot">&lt;-</span> <span class="fu">paste0</span>(sim_df<span class="sc">$</span>genre_i,  <span class="st">"_"</span>,sim_df<span class="sc">$</span>genre_j)</span>
+<span id="cb55-8"><a href="#cb55-8" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>context_comb <span class="ot">&lt;-</span> <span class="fu">paste0</span>(sim_df<span class="sc">$</span>context_i,<span class="st">"_"</span>,sim_df<span class="sc">$</span>context_j)</span>
+<span id="cb55-9"><a href="#cb55-9" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>clip_comb    <span class="ot">&lt;-</span> <span class="fu">paste0</span>(sim_df<span class="sc">$</span>clip_i,   <span class="st">"_"</span>,sim_df<span class="sc">$</span>clip_j)</span>
+<span id="cb55-10"><a href="#cb55-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-11"><a href="#cb55-11" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"genre_comb levels:</span><span class="sc">\n</span><span class="st">"</span>);     <span class="fu">print</span>(<span class="fu">table</span>(sim_df<span class="sc">$</span>genre_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>genre_comb levels:</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+              80s_80s        80s_Electronic              80s_Jazz 
+               116886                115986                123504 
+            80s_Metal        Electronic_80s Electronic_Electronic 
+               121456                117302                115921 
+      Electronic_Jazz      Electronic_Metal              Jazz_80s 
+               123650                121678                121884 
+      Jazz_Electronic             Jazz_Jazz            Jazz_Metal 
+               120724                128271                126312 
+            Metal_80s      Metal_Electronic            Metal_Jazz 
+               114252                113056                120597 
+          Metal_Metal 
+               118341 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb58"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">context_comb levels:</span><span class="sc">\n</span><span class="st">"</span>); <span class="fu">print</span>(<span class="fu">table</span>(sim_df<span class="sc">$</span>context_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+context_comb levels:</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+            bar_bar         bar_concert           bar_movie       bar_videogame 
+             117370              120919              123831              123579 
+        concert_bar     concert_concert       concert_movie   concert_videogame 
+             114306              117370              120462              120306 
+          movie_bar       movie_concert         movie_movie     movie_videogame 
+             117699              121068              123753              123815 
+      videogame_bar   videogame_concert     videogame_movie videogame_videogame 
+             115041              118314              121201              120786 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="co"># clip_comb levels levels not pasted as it's quite long</span></span>
+<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Factor predictors — comb variables as factors for the LMMs</span></span>
+<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>genre_comb   <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_df<span class="sc">$</span>genre_comb)</span>
+<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>context_comb <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_df<span class="sc">$</span>context_comb)</span>
+<span id="cb61-6"><a href="#cb61-6" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>clip_comb    <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_df<span class="sc">$</span>clip_comb)</span>
+<span id="cb61-7"><a href="#cb61-7" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>item_i       <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_df<span class="sc">$</span>item_i)</span>
+<span id="cb61-8"><a href="#cb61-8" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>item_j       <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_df<span class="sc">$</span>item_j)</span>
+<span id="cb61-9"><a href="#cb61-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb61-10"><a href="#cb61-10" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">context_comb levels:"</span>, <span class="fu">nlevels</span>(sim_df<span class="sc">$</span>context_comb), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+context_comb levels: 16 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb63"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">genre_comb levels:  "</span>, <span class="fu">nlevels</span>(sim_df<span class="sc">$</span>genre_comb),   <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+genre_comb levels:   16 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb65"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">clip_comb levels:   "</span>, <span class="fu">nlevels</span>(sim_df<span class="sc">$</span>clip_comb),    <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+clip_comb levels:    256 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb67"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="co"># ── Believability covariate ───────────────────────────────────────────────────</span></span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a>supp_path <span class="ot">&lt;-</span> <span class="fu">file.path</span>(base_path, <span class="st">"dataSUPPstudy.csv"</span>)</span>
+<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a>supp      <span class="ot">&lt;-</span> <span class="fu">read.csv</span>(supp_path, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a>believe_cell <span class="ot">&lt;-</span> supp <span class="sc">|&gt;</span></span>
+<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(clip_name, context_word) <span class="sc">|&gt;</span></span>
+<span id="cb67-7"><a href="#cb67-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(<span class="at">believability =</span> <span class="fu">mean</span>(rating_likelihood.response, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb67-8"><a href="#cb67-8" aria-hidden="true" tabindex="-1"></a>            <span class="at">.groups =</span> <span class="st">"drop"</span>)</span>
+<span id="cb67-9"><a href="#cb67-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-10"><a href="#cb67-10" aria-hidden="true" tabindex="-1"></a>believe_cell<span class="sc">$</span>clip_merge <span class="ot">&lt;-</span> <span class="fu">tolower</span>(<span class="fu">sapply</span>(</span>
+<span id="cb67-11"><a href="#cb67-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">strsplit</span>(<span class="fu">sub</span>(<span class="st">"</span><span class="sc">\\</span><span class="st">.mp3$"</span>, <span class="st">""</span>, believe_cell<span class="sc">$</span>clip_name), <span class="st">"_"</span>),</span>
+<span id="cb67-12"><a href="#cb67-12" aria-hidden="true" tabindex="-1"></a>  <span class="cf">function</span>(x) {</span>
+<span id="cb67-13"><a href="#cb67-13" aria-hidden="true" tabindex="-1"></a>    prefix <span class="ot">&lt;-</span> <span class="cf">switch</span>(<span class="fu">tolower</span>(x[<span class="dv">1</span>]),</span>
+<span id="cb67-14"><a href="#cb67-14" aria-hidden="true" tabindex="-1"></a>      <span class="st">"electronic"</span> <span class="ot">=</span> <span class="st">"ele"</span>, <span class="st">"jazz"</span> <span class="ot">=</span> <span class="st">"jaz"</span>, <span class="st">"metal"</span> <span class="ot">=</span> <span class="st">"met"</span>, <span class="fu">tolower</span>(x[<span class="dv">1</span>]))</span>
+<span id="cb67-15"><a href="#cb67-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">paste</span>(<span class="fu">c</span>(prefix, x[<span class="dv">2</span>], x[<span class="dv">3</span>]), <span class="at">collapse =</span> <span class="st">"_"</span>)</span>
+<span id="cb67-16"><a href="#cb67-16" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb67-17"><a href="#cb67-17" aria-hidden="true" tabindex="-1"></a>))</span>
+<span id="cb67-18"><a href="#cb67-18" aria-hidden="true" tabindex="-1"></a>believe_cell<span class="sc">$</span>cntx_merge <span class="ot">&lt;-</span> <span class="fu">trimws</span>(<span class="fu">tolower</span>(believe_cell<span class="sc">$</span>context_word))</span>
+<span id="cb67-19"><a href="#cb67-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-20"><a href="#cb67-20" aria-hidden="true" tabindex="-1"></a><span class="co"># Merge believability for item i</span></span>
+<span id="cb67-21"><a href="#cb67-21" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>clip_i_merge <span class="ot">&lt;-</span> <span class="fu">trimws</span>(<span class="fu">tolower</span>(<span class="fu">as.character</span>(sim_df<span class="sc">$</span>clip_i)))</span>
+<span id="cb67-22"><a href="#cb67-22" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>cntx_i_merge  <span class="ot">&lt;-</span> <span class="fu">trimws</span>(<span class="fu">tolower</span>(<span class="fu">as.character</span>(sim_df<span class="sc">$</span>context_i)))</span>
+<span id="cb67-23"><a href="#cb67-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-24"><a href="#cb67-24" aria-hidden="true" tabindex="-1"></a>sim_df <span class="ot">&lt;-</span> <span class="fu">merge</span>(sim_df, believe_cell[, <span class="fu">c</span>(<span class="st">"clip_merge"</span>, <span class="st">"cntx_merge"</span>, <span class="st">"believability"</span>)],</span>
+<span id="cb67-25"><a href="#cb67-25" aria-hidden="true" tabindex="-1"></a>                <span class="at">by.x =</span> <span class="fu">c</span>(<span class="st">"clip_i_merge"</span>, <span class="st">"cntx_i_merge"</span>),</span>
+<span id="cb67-26"><a href="#cb67-26" aria-hidden="true" tabindex="-1"></a>                <span class="at">by.y =</span> <span class="fu">c</span>(<span class="st">"clip_merge"</span>,   <span class="st">"cntx_merge"</span>),</span>
+<span id="cb67-27"><a href="#cb67-27" aria-hidden="true" tabindex="-1"></a>                <span class="at">all.x =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb67-28"><a href="#cb67-28" aria-hidden="true" tabindex="-1"></a><span class="fu">names</span>(sim_df)[<span class="fu">names</span>(sim_df) <span class="sc">==</span> <span class="st">"believability"</span>] <span class="ot">&lt;-</span> <span class="st">"believability_i"</span></span>
+<span id="cb67-29"><a href="#cb67-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-30"><a href="#cb67-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Merge believability for item j</span></span>
+<span id="cb67-31"><a href="#cb67-31" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>clip_j_merge <span class="ot">&lt;-</span> <span class="fu">trimws</span>(<span class="fu">tolower</span>(<span class="fu">as.character</span>(sim_df<span class="sc">$</span>clip_j)))</span>
+<span id="cb67-32"><a href="#cb67-32" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>cntx_j_merge  <span class="ot">&lt;-</span> <span class="fu">trimws</span>(<span class="fu">tolower</span>(<span class="fu">as.character</span>(sim_df<span class="sc">$</span>context_j)))</span>
+<span id="cb67-33"><a href="#cb67-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-34"><a href="#cb67-34" aria-hidden="true" tabindex="-1"></a>sim_df <span class="ot">&lt;-</span> <span class="fu">merge</span>(sim_df, </span>
+<span id="cb67-35"><a href="#cb67-35" aria-hidden="true" tabindex="-1"></a>                believe_cell[, <span class="fu">c</span>(<span class="st">"clip_merge"</span>, <span class="st">"cntx_merge"</span>, <span class="st">"believability"</span>)],</span>
+<span id="cb67-36"><a href="#cb67-36" aria-hidden="true" tabindex="-1"></a>                <span class="at">by.x =</span> <span class="fu">c</span>(<span class="st">"clip_j_merge"</span>, <span class="st">"cntx_j_merge"</span>),</span>
+<span id="cb67-37"><a href="#cb67-37" aria-hidden="true" tabindex="-1"></a>                <span class="at">by.y =</span> <span class="fu">c</span>(<span class="st">"clip_merge"</span>,   <span class="st">"cntx_merge"</span>),</span>
+<span id="cb67-38"><a href="#cb67-38" aria-hidden="true" tabindex="-1"></a>                <span class="at">all.x =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb67-39"><a href="#cb67-39" aria-hidden="true" tabindex="-1"></a><span class="fu">names</span>(sim_df)[<span class="fu">names</span>(sim_df) <span class="sc">==</span> <span class="st">"believability"</span>] <span class="ot">&lt;-</span> <span class="st">"believability_j"</span></span>
+<span id="cb67-40"><a href="#cb67-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-41"><a href="#cb67-41" aria-hidden="true" tabindex="-1"></a><span class="co"># Pair-level believability = mean of both items' cell ratings</span></span>
+<span id="cb67-42"><a href="#cb67-42" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>believability_pair <span class="ot">&lt;-</span> <span class="fu">rowMeans</span>(</span>
+<span id="cb67-43"><a href="#cb67-43" aria-hidden="true" tabindex="-1"></a>  sim_df[, <span class="fu">c</span>(<span class="st">"believability_i"</span>, <span class="st">"believability_j"</span>)], <span class="at">na.rm =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb67-44"><a href="#cb67-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-45"><a href="#cb67-45" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">Rows with full pair believability:"</span>, <span class="fu">sum</span>(<span class="sc">!</span><span class="fu">is.na</span>(sim_df<span class="sc">$</span>believability_pair)),</span>
+<span id="cb67-46"><a href="#cb67-46" aria-hidden="true" tabindex="-1"></a>    <span class="st">"of"</span>, <span class="fu">nrow</span>(sim_df), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Rows with full pair believability: 1919820 of 1919820 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb69"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Rows with NA (unmatched):"</span>, <span class="fu">sum</span>(<span class="fu">is.na</span>(sim_df<span class="sc">$</span>believability_pair)), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Rows with NA (unmatched): 0 </code></pre>
+</div>
+</div>
+</section>
+<section id="lmm-models" class="level3">
+<h3 class="anchored" data-anchor-id="lmm-models">LMM Models</h3>
+<section id="model-1-context-genre-main-effects" class="level4">
+<h4 class="anchored" data-anchor-id="model-1-context-genre-main-effects">Model 1: context + genre main effects</h4>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb71"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"———MODEL 1: similarity ~ context_comb + genre_comb </span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="st">               + (1 | item_i) + (1 | item_j), + (1 | clip_comb)———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>———MODEL 1: similarity ~ context_comb + genre_comb 
+               + (1 | item_i) + (1 | item_j), + (1 | clip_comb)———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb73"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a>model1 <span class="ot">&lt;-</span> <span class="fu">lmer</span>(similarity <span class="sc">~</span> context_comb <span class="sc">+</span> genre_comb </span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a>               <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_i) <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_j) <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> clip_comb),</span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a>               <span class="at">data =</span> sim_df, <span class="at">REML =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">anova</span>(model1))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Type III Analysis of Variance Table with Satterthwaite's method
+              Sum Sq Mean Sq NumDF  DenDF F value    Pr(&gt;F)    
+context_comb 25.2035 1.68023    15 5790.3 203.506 &lt; 2.2e-16 ***
+genre_comb    1.4361 0.09574    15  351.3  11.596 &lt; 2.2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb75"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Omnibus fixed effects — no reference level———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Omnibus fixed effects — no reference level———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb77"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(car<span class="sc">::</span><span class="fu">Anova</span>(model1, <span class="at">type =</span> <span class="dv">3</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Registered S3 method overwritten by 'car':
+  method           from
+  na.action.merMod lme4</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table (Type III Wald chisquare tests)
+
+Response: similarity
+                Chisq Df Pr(&gt;Chisq)    
+(Intercept)  13470.56  1  &lt; 2.2e-16 ***
+context_comb  3052.59 15  &lt; 2.2e-16 ***
+genre_comb     173.94 15  &lt; 2.2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb80"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Pseudo-R² (Nakagawa &amp; Schielzeth), variance explained:———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Pseudo-R² (Nakagawa &amp; Schielzeth), variance explained:———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb82"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb82-1"><a href="#cb82-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(MuMIn<span class="sc">::</span><span class="fu">r.squaredGLMM</span>(model1))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           R2m     R2c
+[1,] 0.0121326 0.31649</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb84"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb84-1"><a href="#cb84-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, context combos with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, context combos with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb86"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb86-1"><a href="#cb86-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model1, <span class="sc">~</span> context_comb))   <span class="co"># mean per context combination with CI</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.186 0.00281 Inf     0.181     0.192
+ bar_concert          0.186 0.00281 Inf     0.180     0.191
+ bar_movie            0.174 0.00279 Inf     0.169     0.179
+ bar_videogame        0.168 0.00280 Inf     0.163     0.174
+ concert_bar          0.186 0.00282 Inf     0.180     0.191
+ concert_concert      0.191 0.00281 Inf     0.185     0.196
+ concert_movie        0.175 0.00280 Inf     0.169     0.180
+ concert_videogame    0.169 0.00281 Inf     0.163     0.174
+ movie_bar            0.172 0.00280 Inf     0.166     0.177
+ movie_concert        0.172 0.00280 Inf     0.167     0.178
+ movie_movie          0.172 0.00278 Inf     0.167     0.178
+ movie_videogame      0.166 0.00279 Inf     0.161     0.172
+ videogame_bar        0.167 0.00281 Inf     0.162     0.173
+ videogame_concert    0.167 0.00281 Inf     0.162     0.173
+ videogame_movie      0.166 0.00279 Inf     0.160     0.171
+ videogame_videogame  0.166 0.00280 Inf     0.160     0.171
+
+Results are averaged over the levels of: genre_comb 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb90"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, genre combos with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, genre combos with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb92"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb92-1"><a href="#cb92-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model1, <span class="sc">~</span> genre_comb))     <span class="co"># mean per genre combination with CI</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.
+Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> genre_comb            emmean      SE  df asymp.LCL asymp.UCL
+ 80s_80s                0.186 0.00371 Inf     0.178     0.193
+ 80s_Electronic         0.175 0.00372 Inf     0.167     0.182
+ 80s_Jazz               0.183 0.00369 Inf     0.176     0.190
+ 80s_Metal              0.162 0.00371 Inf     0.155     0.169
+ Electronic_80s         0.173 0.00372 Inf     0.165     0.180
+ Electronic_Electronic  0.180 0.00372 Inf     0.173     0.187
+ Electronic_Jazz        0.170 0.00370 Inf     0.163     0.177
+ Electronic_Metal       0.171 0.00371 Inf     0.164     0.179
+ Jazz_80s               0.183 0.00369 Inf     0.176     0.190
+ Jazz_Electronic        0.172 0.00369 Inf     0.164     0.179
+ Jazz_Jazz              0.190 0.00367 Inf     0.183     0.197
+ Jazz_Metal             0.161 0.00369 Inf     0.154     0.169
+ Metal_80s              0.162 0.00371 Inf     0.155     0.170
+ Metal_Electronic       0.171 0.00371 Inf     0.163     0.178
+ Metal_Jazz             0.162 0.00369 Inf     0.154     0.169
+ Metal_Metal            0.182 0.00371 Inf     0.175     0.189
+
+Results are averaged over the levels of: context_comb 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb95"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb95-1"><a href="#cb95-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———random effects variance check———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———random effects variance check———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb97"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb97-1"><a href="#cb97-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">summary</span>(model1)<span class="sc">$</span>varcor)   <span class="co"># random effects variance only, no fixed effect coefficients</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> Groups    Name        Std.Dev.
+ item_i    (Intercept) 0.043298
+ item_j    (Intercept) 0.041252
+ clip_comb (Intercept) 0.010002
+ Residual              0.090865</code></pre>
+</div>
+</div>
+</section>
+<section id="model-2-believability-covariate" class="level4">
+<h4 class="anchored" data-anchor-id="model-2-believability-covariate">Model 2: + believability covariate</h4>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb99"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb99-1"><a href="#cb99-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———MODEL 2: + believability_pair———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———MODEL 2: + believability_pair———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb101"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb101-1"><a href="#cb101-1" aria-hidden="true" tabindex="-1"></a>model2 <span class="ot">&lt;-</span> <span class="fu">lmer</span>(similarity <span class="sc">~</span> context_comb <span class="sc">+</span> genre_comb <span class="sc">+</span> believability_pair </span>
+<span id="cb101-2"><a href="#cb101-2" aria-hidden="true" tabindex="-1"></a>               <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_i) <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_j) <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> clip_comb),</span>
+<span id="cb101-3"><a href="#cb101-3" aria-hidden="true" tabindex="-1"></a>               <span class="at">data =</span> sim_df, <span class="at">REML =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb101-4"><a href="#cb101-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb101-5"><a href="#cb101-5" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">anova</span>(model2))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Type III Analysis of Variance Table with Satterthwaite's method
+                    Sum Sq Mean Sq NumDF  DenDF  F value Pr(&gt;F)    
+context_comb       25.1937 1.67958    15 6126.0 203.4271 &lt;2e-16 ***
+genre_comb          1.4288 0.09525    15  353.5  11.5367 &lt;2e-16 ***
+believability_pair  0.0002 0.00016     1 4048.6   0.0196 0.8885    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb103"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb103-1"><a href="#cb103-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Omnibus fixed effects — no reference level———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Omnibus fixed effects — no reference level———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb105"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb105-1"><a href="#cb105-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(car<span class="sc">::</span><span class="fu">Anova</span>(model2, <span class="at">type =</span> <span class="dv">3</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table (Type III Wald chisquare tests)
+
+Response: similarity
+                       Chisq Df Pr(&gt;Chisq)    
+(Intercept)         140.5007  1     &lt;2e-16 ***
+context_comb       3051.4064 15     &lt;2e-16 ***
+genre_comb          173.0501 15     &lt;2e-16 ***
+believability_pair    0.0196  1     0.8885    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb107"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb107-1"><a href="#cb107-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Pseudo-R² (Nakagawa &amp; Schielzeth), variance explained:———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Pseudo-R² (Nakagawa &amp; Schielzeth), variance explained:———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb109"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb109-1"><a href="#cb109-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(MuMIn<span class="sc">::</span><span class="fu">r.squaredGLMM</span>(model2))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            R2m       R2c
+[1,] 0.01213349 0.3164817</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb111"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb111-1"><a href="#cb111-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, context combos with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, context combos with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb113"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb113-1"><a href="#cb113-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model2, <span class="sc">~</span> context_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.186 0.00281 Inf     0.181     0.192
+ bar_concert          0.186 0.00282 Inf     0.180     0.191
+ bar_movie            0.174 0.00280 Inf     0.169     0.179
+ bar_videogame        0.168 0.00281 Inf     0.163     0.174
+ concert_bar          0.186 0.00282 Inf     0.180     0.191
+ concert_concert      0.191 0.00283 Inf     0.185     0.196
+ concert_movie        0.175 0.00281 Inf     0.169     0.180
+ concert_videogame    0.169 0.00281 Inf     0.163     0.174
+ movie_bar            0.172 0.00280 Inf     0.166     0.177
+ movie_concert        0.172 0.00281 Inf     0.167     0.178
+ movie_movie          0.172 0.00278 Inf     0.167     0.178
+ movie_videogame      0.166 0.00279 Inf     0.161     0.172
+ videogame_bar        0.167 0.00282 Inf     0.162     0.173
+ videogame_concert    0.167 0.00281 Inf     0.162     0.173
+ videogame_movie      0.166 0.00279 Inf     0.160     0.171
+ videogame_videogame  0.166 0.00284 Inf     0.160     0.171
+
+Results are averaged over the levels of: genre_comb 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb117"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb117-1"><a href="#cb117-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, genre combos with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, genre combos with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb119"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb119-1"><a href="#cb119-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model2, <span class="sc">~</span> genre_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.
+Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> genre_comb            emmean      SE  df asymp.LCL asymp.UCL
+ 80s_80s                0.186 0.00372 Inf     0.178     0.193
+ 80s_Electronic         0.175 0.00372 Inf     0.167     0.182
+ 80s_Jazz               0.183 0.00371 Inf     0.176     0.191
+ 80s_Metal              0.162 0.00373 Inf     0.154     0.169
+ Electronic_80s         0.173 0.00372 Inf     0.165     0.180
+ Electronic_Electronic  0.180 0.00373 Inf     0.173     0.187
+ Electronic_Jazz        0.170 0.00372 Inf     0.163     0.177
+ Electronic_Metal       0.171 0.00373 Inf     0.164     0.179
+ Jazz_80s               0.183 0.00371 Inf     0.176     0.190
+ Jazz_Electronic        0.172 0.00371 Inf     0.164     0.179
+ Jazz_Jazz              0.190 0.00370 Inf     0.183     0.197
+ Jazz_Metal             0.161 0.00369 Inf     0.154     0.169
+ Metal_80s              0.162 0.00373 Inf     0.155     0.170
+ Metal_Electronic       0.171 0.00373 Inf     0.163     0.178
+ Metal_Jazz             0.162 0.00370 Inf     0.154     0.169
+ Metal_Metal            0.182 0.00383 Inf     0.174     0.189
+
+Results are averaged over the levels of: context_comb 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb122"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb122-1"><a href="#cb122-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———random effects variance check———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———random effects variance check———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb124"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb124-1"><a href="#cb124-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">summary</span>(model2)<span class="sc">$</span>varcor)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> Groups    Name        Std.Dev. 
+ item_i    (Intercept) 0.0432963
+ item_j    (Intercept) 0.0412524
+ clip_comb (Intercept) 0.0099992
+ Residual              0.0908649</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb126"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb126-1"><a href="#cb126-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Model comparison — Model 1 vs Model 2 (believability_pair):———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Model comparison — Model 1 vs Model 2 (believability_pair):———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb128"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb128-1"><a href="#cb128-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">anova</span>(model1, model2))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Data: sim_df
+Models:
+model1: similarity ~ context_comb + genre_comb + (1 | item_i) + (1 | item_j) + (1 | clip_comb)
+model2: similarity ~ context_comb + genre_comb + believability_pair + (1 | item_i) + (1 | item_j) + (1 | clip_comb)
+       npar      AIC      BIC  logLik -2*log(L)  Chisq Df Pr(&gt;Chisq)
+model1   35 -3739764 -3739327 1869917  -3739834                     
+model2   36 -3739762 -3739313 1869917  -3739834 0.0196  1     0.8886</code></pre>
+</div>
+</div>
+</section>
+<section id="model-3-context-genre-interaction" class="level4">
+<h4 class="anchored" data-anchor-id="model-3-context-genre-interaction">Model 3: context × genre interaction</h4>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb130"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb130-1"><a href="#cb130-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———MODEL 3A: context_comb × genre_comb interaction (downsized sample)———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———MODEL 3A: context_comb × genre_comb interaction (downsized sample)———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb132"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb132-1"><a href="#cb132-1" aria-hidden="true" tabindex="-1"></a><span class="co"># *</span><span class="al">NOTE</span><span class="co">: with 1.9M rows, context_comb * genre_comb generates 16×16 = 256</span></span>
+<span id="cb132-2"><a href="#cb132-2" aria-hidden="true" tabindex="-1"></a><span class="co">#        interaction terms — too much for memory with three random effects.</span></span>
+<span id="cb132-3"><a href="#cb132-3" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">41100</span>)</span>
+<span id="cb132-4"><a href="#cb132-4" aria-hidden="true" tabindex="-1"></a>sim_sub <span class="ot">&lt;-</span> sim_df[<span class="fu">sample</span>(<span class="fu">nrow</span>(sim_df), <span class="dv">200000</span>), ]</span>
+<span id="cb132-5"><a href="#cb132-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb132-6"><a href="#cb132-6" aria-hidden="true" tabindex="-1"></a>model3A <span class="ot">&lt;-</span> <span class="fu">lmer</span>(similarity <span class="sc">~</span> context_comb <span class="sc">*</span> genre_comb </span>
+<span id="cb132-7"><a href="#cb132-7" aria-hidden="true" tabindex="-1"></a>               <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_i) <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_j),</span>
+<span id="cb132-8"><a href="#cb132-8" aria-hidden="true" tabindex="-1"></a>               <span class="at">data =</span> sim_sub, <span class="at">REML =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb132-9"><a href="#cb132-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb132-10"><a href="#cb132-10" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">anova</span>(model3A))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Type III Analysis of Variance Table with Satterthwaite's method
+                         Sum Sq Mean Sq NumDF   DenDF  F value    Pr(&gt;F)    
+context_comb             2.7397 0.18264    15  5680.5  21.9474 &lt; 2.2e-16 ***
+genre_comb              13.3186 0.88791    15  5745.7 106.6954 &lt; 2.2e-16 ***
+context_comb:genre_comb  5.5693 0.02475   225 24734.8   2.9744 &lt; 2.2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb134"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb134-1"><a href="#cb134-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Omnibus fixed effects — no reference level———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Omnibus fixed effects — no reference level———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb136"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb136-1"><a href="#cb136-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(car<span class="sc">::</span><span class="fu">Anova</span>(model3A, <span class="at">type =</span> <span class="dv">3</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table (Type III Wald chisquare tests)
+
+Response: similarity
+                           Chisq  Df Pr(&gt;Chisq)    
+(Intercept)             15200.11   1  &lt; 2.2e-16 ***
+context_comb              329.21  15  &lt; 2.2e-16 ***
+genre_comb               1600.43  15  &lt; 2.2e-16 ***
+context_comb:genre_comb   669.24 225  &lt; 2.2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb138"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb138-1"><a href="#cb138-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Pseudo-R²:———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Pseudo-R²:———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb140"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb140-1"><a href="#cb140-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(MuMIn<span class="sc">::</span><span class="fu">r.squaredGLMM</span>(model3A))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            R2m       R2c
+[1,] 0.01635756 0.3095564</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb142"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb142-1"><a href="#cb142-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, context combos with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, context combos with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb144"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb144-1"><a href="#cb144-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3A, <span class="sc">~</span> context_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>NOTE: Results may be misleading due to involvement in interactions</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.184 0.00290 Inf     0.178     0.190
+ bar_concert          0.183 0.00289 Inf     0.177     0.189
+ bar_movie            0.175 0.00287 Inf     0.169     0.181
+ bar_videogame        0.165 0.00288 Inf     0.160     0.171
+ concert_bar          0.187 0.00290 Inf     0.181     0.193
+ concert_concert      0.190 0.00290 Inf     0.184     0.195
+ concert_movie        0.173 0.00288 Inf     0.167     0.179
+ concert_videogame    0.169 0.00288 Inf     0.163     0.174
+ movie_bar            0.170 0.00288 Inf     0.165     0.176
+ movie_concert        0.172 0.00288 Inf     0.166     0.177
+ movie_movie          0.170 0.00285 Inf     0.164     0.175
+ movie_videogame      0.164 0.00286 Inf     0.158     0.169
+ videogame_bar        0.168 0.00290 Inf     0.162     0.174
+ videogame_concert    0.167 0.00289 Inf     0.162     0.173
+ videogame_movie      0.166 0.00287 Inf     0.161     0.172
+ videogame_videogame  0.165 0.00288 Inf     0.160     0.171
+
+Results are averaged over the levels of: genre_comb 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb149"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb149-1"><a href="#cb149-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, genre combos with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, genre combos with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb151"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb151-1"><a href="#cb151-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3A, <span class="sc">~</span> genre_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>NOTE: Results may be misleading due to involvement in interactions</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> genre_comb            emmean      SE  df asymp.LCL asymp.UCL
+ 80s_80s                0.184 0.00290 Inf     0.178     0.190
+ 80s_Electronic         0.172 0.00290 Inf     0.167     0.178
+ 80s_Jazz               0.182 0.00286 Inf     0.176     0.187
+ 80s_Metal              0.162 0.00289 Inf     0.156     0.168
+ Electronic_80s         0.171 0.00290 Inf     0.165     0.177
+ Electronic_Electronic  0.180 0.00291 Inf     0.174     0.185
+ Electronic_Jazz        0.170 0.00287 Inf     0.164     0.175
+ Electronic_Metal       0.173 0.00289 Inf     0.168     0.179
+ Jazz_80s               0.183 0.00287 Inf     0.178     0.189
+ Jazz_Electronic        0.171 0.00287 Inf     0.166     0.177
+ Jazz_Jazz              0.189 0.00283 Inf     0.183     0.194
+ Jazz_Metal             0.160 0.00285 Inf     0.155     0.166
+ Metal_80s              0.162 0.00290 Inf     0.156     0.168
+ Metal_Electronic       0.169 0.00291 Inf     0.163     0.174
+ Metal_Jazz             0.159 0.00287 Inf     0.153     0.165
+ Metal_Metal            0.182 0.00289 Inf     0.176     0.187
+
+Results are averaged over the levels of: context_comb 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb156"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb156-1"><a href="#cb156-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———random effects variance check———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———random effects variance check———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb158"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb158-1"><a href="#cb158-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">summary</span>(model3A)<span class="sc">$</span>varcor)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> Groups   Name        Std.Dev.
+ item_i   (Intercept) 0.043228
+ item_j   (Intercept) 0.040808
+ Residual             0.091224</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb160"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb160-1"><a href="#cb160-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———MODEL 3B: context_i × genre_i interaction (simplified, full data)———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———MODEL 3B: context_i × genre_i interaction (simplified, full data)———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb162"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb162-1"><a href="#cb162-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Uses single-item _i variables (4 levels each) rather than _comb (16 levels).</span></span>
+<span id="cb162-2"><a href="#cb162-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Tests whether context effect on similarity interacts with music genre —</span></span>
+<span id="cb162-3"><a href="#cb162-3" aria-hidden="true" tabindex="-1"></a><span class="co"># more directly interpretable for RQ3 and fits in memory on the full dataset.</span></span>
+<span id="cb162-4"><a href="#cb162-4" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>context_i <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_df<span class="sc">$</span>context_i)</span>
+<span id="cb162-5"><a href="#cb162-5" aria-hidden="true" tabindex="-1"></a>sim_df<span class="sc">$</span>genre_i   <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_df<span class="sc">$</span>genre_i)</span>
+<span id="cb162-6"><a href="#cb162-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb162-7"><a href="#cb162-7" aria-hidden="true" tabindex="-1"></a>model3B <span class="ot">&lt;-</span> <span class="fu">lmer</span>(similarity <span class="sc">~</span> context_i <span class="sc">*</span> genre_i </span>
+<span id="cb162-8"><a href="#cb162-8" aria-hidden="true" tabindex="-1"></a>               <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_i) <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_j),</span>
+<span id="cb162-9"><a href="#cb162-9" aria-hidden="true" tabindex="-1"></a>               <span class="at">data =</span> sim_df, <span class="at">REML =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb162-10"><a href="#cb162-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb162-11"><a href="#cb162-11" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">anova</span>(model3B))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Type III Analysis of Variance Table with Satterthwaite's method
+                    Sum Sq  Mean Sq NumDF  DenDF F value    Pr(&gt;F)    
+context_i         0.264992 0.088331     3 1943.6 10.4825 7.701e-07 ***
+genre_i           0.080991 0.026997     3 1943.6  3.2038   0.02239 *  
+context_i:genre_i 0.121934 0.013548     9 1943.6  1.6078   0.10743    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb164"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb164-1"><a href="#cb164-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Omnibus fixed effects — no reference level———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Omnibus fixed effects — no reference level———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb166"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb166-1"><a href="#cb166-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(car<span class="sc">::</span><span class="fu">Anova</span>(model3B, <span class="at">type =</span> <span class="dv">3</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table (Type III Wald chisquare tests)
+
+Response: similarity
+                       Chisq Df Pr(&gt;Chisq)    
+(Intercept)       16181.7090  1  &lt; 2.2e-16 ***
+context_i            31.4475  3  6.842e-07 ***
+genre_i               9.6115  3    0.02217 *  
+context_i:genre_i    14.4703  9    0.10655    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb168"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb168-1"><a href="#cb168-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Pseudo-R²:———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Pseudo-R²:———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb170"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb170-1"><a href="#cb170-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(MuMIn<span class="sc">::</span><span class="fu">r.squaredGLMM</span>(model3B))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>             R2m       R2c
+[1,] 0.004304682 0.3027595</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb172"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb172-1"><a href="#cb172-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, context_i with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, context_i with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb174"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb174-1"><a href="#cb174-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3B, <span class="sc">~</span> context_i))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>NOTE: Results may be misleading due to involvement in interactions</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.178 0.00219 Inf     0.174     0.183
+ concert    0.180 0.00219 Inf     0.176     0.184
+ movie      0.171 0.00217 Inf     0.166     0.175
+ videogame  0.166 0.00218 Inf     0.162     0.171
+
+Results are averaged over the levels of: genre_i 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb179"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb179-1"><a href="#cb179-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, genre_i with CI———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, genre_i with CI———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb181"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb181-1"><a href="#cb181-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3B, <span class="sc">~</span> genre_i))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>NOTE: Results may be misleading due to involvement in interactions</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code> genre_i    emmean      SE  df asymp.LCL asymp.UCL
+ 80s         0.176 0.00219 Inf     0.172     0.181
+ Electronic  0.174 0.00220 Inf     0.169     0.178
+ Jazz        0.177 0.00215 Inf     0.172     0.181
+ Metal       0.169 0.00219 Inf     0.165     0.173
+
+Results are averaged over the levels of: context_i 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb186"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb186-1"><a href="#cb186-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———EMMean, context_i × genre_i cell means———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———EMMean, context_i × genre_i cell means———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb188"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb188-1"><a href="#cb188-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3B, <span class="sc">~</span> context_i <span class="sc">|</span> genre_i))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>genre_i = 80s:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.186 0.00413 Inf     0.178     0.194
+ concert    0.181 0.00410 Inf     0.173     0.189
+ movie      0.169 0.00404 Inf     0.161     0.177
+ videogame  0.169 0.00400 Inf     0.162     0.177
+
+genre_i = Electronic:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.174 0.00409 Inf     0.166     0.182
+ concert    0.181 0.00413 Inf     0.173     0.189
+ movie      0.175 0.00406 Inf     0.167     0.183
+ videogame  0.164 0.00402 Inf     0.156     0.172
+
+genre_i = Jazz:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.177 0.00397 Inf     0.169     0.184
+ concert    0.181 0.00404 Inf     0.173     0.189
+ movie      0.172 0.00390 Inf     0.164     0.179
+ videogame  0.177 0.00401 Inf     0.169     0.185
+
+genre_i = Metal:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.176 0.00405 Inf     0.168     0.184
+ concert    0.177 0.00399 Inf     0.169     0.185
+ movie      0.167 0.00407 Inf     0.159     0.175
+ videogame  0.156 0.00413 Inf     0.147     0.164
+
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb192"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb192-1"><a href="#cb192-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———random effects variance check———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———random effects variance check———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb194"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb194-1"><a href="#cb194-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">summary</span>(model3B)<span class="sc">$</span>varcor)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> Groups   Name        Std.Dev.
+ item_i   (Intercept) 0.043224
+ item_j   (Intercept) 0.041697
+ Residual             0.091796</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb196"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb196-1"><a href="#cb196-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Model 1 vs Model 2 (believability_pair):———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Model 1 vs Model 2 (believability_pair):———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb198"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb198-1"><a href="#cb198-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">anova</span>(model1, model2))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Data: sim_df
+Models:
+model1: similarity ~ context_comb + genre_comb + (1 | item_i) + (1 | item_j) + (1 | clip_comb)
+model2: similarity ~ context_comb + genre_comb + believability_pair + (1 | item_i) + (1 | item_j) + (1 | clip_comb)
+       npar      AIC      BIC  logLik -2*log(L)  Chisq Df Pr(&gt;Chisq)
+model1   35 -3739764 -3739327 1869917  -3739834                     
+model2   36 -3739762 -3739313 1869917  -3739834 0.0196  1     0.8886</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb200"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb200-1"><a href="#cb200-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———Model 1A vs Model 3A (downsized, context_comb × genre_comb interaction):———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———Model 1A vs Model 3A (downsized, context_comb × genre_comb interaction):———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb202"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb202-1"><a href="#cb202-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Refit Model 1 on same downsized sample for a valid comparison with Model 3A</span></span>
+<span id="cb202-2"><a href="#cb202-2" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">41100</span>)</span>
+<span id="cb202-3"><a href="#cb202-3" aria-hidden="true" tabindex="-1"></a>sim_sub  <span class="ot">&lt;-</span> sim_df[<span class="fu">sample</span>(<span class="fu">nrow</span>(sim_df), <span class="dv">200000</span>), ]</span>
+<span id="cb202-4"><a href="#cb202-4" aria-hidden="true" tabindex="-1"></a>model1A  <span class="ot">&lt;-</span> <span class="fu">lmer</span>(similarity <span class="sc">~</span> context_comb <span class="sc">+</span> genre_comb</span>
+<span id="cb202-5"><a href="#cb202-5" aria-hidden="true" tabindex="-1"></a>                 <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_i) <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">|</span> item_j),</span>
+<span id="cb202-6"><a href="#cb202-6" aria-hidden="true" tabindex="-1"></a>                 <span class="at">data =</span> sim_sub, <span class="at">REML =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb202-7"><a href="#cb202-7" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">anova</span>(model1A, model3A))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Data: sim_sub
+Models:
+model1A: similarity ~ context_comb + genre_comb + (1 | item_i) + (1 | item_j)
+model3A: similarity ~ context_comb * genre_comb + (1 | item_i) + (1 | item_j)
+        npar     AIC     BIC logLik -2*log(L)  Chisq  Df Pr(&gt;Chisq)    
+model1A   34 -378222 -377875 189145   -378290                          
+model3A  259 -378440 -375797 189479   -378958 668.09 225  &lt; 2.2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb204"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb204-1"><a href="#cb204-1" aria-hidden="true" tabindex="-1"></a><span class="co"># *NB: model3B cannot be directly compared to model1 via anova() because</span></span>
+<span id="cb204-2"><a href="#cb204-2" aria-hidden="true" tabindex="-1"></a><span class="co">#      fixed effects are differently specified (_i vs _comb variables)</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section>
+</section>
+<section id="estimated-marginal-means" class="level3">
+<h3 class="anchored" data-anchor-id="estimated-marginal-means">Estimated Marginal Means</h3>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb205"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb205-1"><a href="#cb205-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"———ESTIMATED MARGINAL MEANS — Model 3A (downsized)———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>———ESTIMATED MARGINAL MEANS — Model 3A (downsized)———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb207"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb207-1"><a href="#cb207-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"(pairwise context contrasts, Tukey adjustment)</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>(pairwise context contrasts, Tukey adjustment)</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb209"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb209-1"><a href="#cb209-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3A, pairwise <span class="sc">~</span> context_comb, <span class="at">adjust =</span> <span class="st">"tukey"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>NOTE: Results may be misleading due to involvement in interactions</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>$emmeans
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.184 0.00290 Inf     0.178     0.190
+ bar_concert          0.183 0.00289 Inf     0.177     0.189
+ bar_movie            0.175 0.00287 Inf     0.169     0.181
+ bar_videogame        0.165 0.00288 Inf     0.160     0.171
+ concert_bar          0.187 0.00290 Inf     0.181     0.193
+ concert_concert      0.190 0.00290 Inf     0.184     0.195
+ concert_movie        0.173 0.00288 Inf     0.167     0.179
+ concert_videogame    0.169 0.00288 Inf     0.163     0.174
+ movie_bar            0.170 0.00288 Inf     0.165     0.176
+ movie_concert        0.172 0.00288 Inf     0.166     0.177
+ movie_movie          0.170 0.00285 Inf     0.164     0.175
+ movie_videogame      0.164 0.00286 Inf     0.158     0.169
+ videogame_bar        0.168 0.00290 Inf     0.162     0.174
+ videogame_concert    0.167 0.00289 Inf     0.162     0.173
+ videogame_movie      0.166 0.00287 Inf     0.161     0.172
+ videogame_videogame  0.165 0.00288 Inf     0.160     0.171
+
+Results are averaged over the levels of: genre_comb 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 
+
+$contrasts
+ contrast                                 estimate      SE  df z.ratio p.value
+ bar_bar - bar_concert                    0.000929 0.00294 Inf   0.317  1.0000
+ bar_bar - bar_movie                      0.009122 0.00292 Inf   3.129  0.1203
+ bar_bar - bar_videogame                  0.018678 0.00293 Inf   6.385 &lt;0.0001
+ bar_bar - concert_bar                   -0.002789 0.00308 Inf  -0.905  0.9999
+ bar_bar - concert_concert               -0.005736 0.00409 Inf  -1.402  0.9911
+ bar_bar - concert_movie                  0.011103 0.00408 Inf   2.724  0.3148
+ bar_bar - concert_videogame              0.015313 0.00408 Inf   3.752  0.0164
+ bar_bar - movie_bar                      0.013782 0.00306 Inf   4.500  0.0007
+ bar_bar - movie_concert                  0.012327 0.00408 Inf   3.024  0.1586
+ bar_bar - movie_movie                    0.014388 0.00406 Inf   3.543  0.0341
+ bar_bar - movie_videogame                0.020236 0.00407 Inf   4.976 &lt;0.0001
+ bar_bar - videogame_bar                  0.016028 0.00308 Inf   5.207 &lt;0.0001
+ bar_bar - videogame_concert              0.016532 0.00409 Inf   4.046  0.0053
+ bar_bar - videogame_movie                0.017844 0.00407 Inf   4.384  0.0013
+ bar_bar - videogame_videogame            0.018593 0.00408 Inf   4.559  0.0006
+ bar_concert - bar_movie                  0.008193 0.00291 Inf   2.815  0.2600
+ bar_concert - bar_videogame              0.017749 0.00292 Inf   6.078 &lt;0.0001
+ bar_concert - concert_bar               -0.003719 0.00409 Inf  -0.909  0.9999
+ bar_concert - concert_concert           -0.006666 0.00307 Inf  -2.168  0.7196
+ bar_concert - concert_movie              0.010174 0.00407 Inf   2.498  0.4726
+ bar_concert - concert_videogame          0.014383 0.00408 Inf   3.528  0.0359
+ bar_concert - movie_bar                  0.012852 0.00408 Inf   3.153  0.1126
+ bar_concert - movie_concert              0.011398 0.00305 Inf   3.732  0.0176
+ bar_concert - movie_movie                0.013459 0.00406 Inf   3.318  0.0700
+ bar_concert - movie_videogame            0.019307 0.00406 Inf   4.752  0.0002
+ bar_concert - videogame_bar              0.015099 0.00409 Inf   3.694  0.0202
+ bar_concert - videogame_concert          0.015602 0.00307 Inf   5.086 &lt;0.0001
+ bar_concert - videogame_movie            0.016915 0.00407 Inf   4.160  0.0033
+ bar_concert - videogame_videogame        0.017664 0.00407 Inf   4.336  0.0016
+ bar_movie - bar_videogame                0.009556 0.00290 Inf   3.295  0.0750
+ bar_movie - concert_bar                 -0.011912 0.00408 Inf  -2.922  0.2040
+ bar_movie - concert_concert             -0.014859 0.00407 Inf  -3.649  0.0237
+ bar_movie - concert_movie                0.001981 0.00307 Inf   0.645  1.0000
+ bar_movie - concert_videogame            0.006190 0.00406 Inf   1.524  0.9800
+ bar_movie - movie_bar                    0.004659 0.00406 Inf   1.147  0.9990
+ bar_movie - movie_concert                0.003205 0.00406 Inf   0.790  1.0000
+ bar_movie - movie_movie                  0.005266 0.00305 Inf   1.727  0.9402
+ bar_movie - movie_videogame              0.011114 0.00405 Inf   2.745  0.3015
+ bar_movie - videogame_bar                0.006906 0.00407 Inf   1.696  0.9485
+ bar_movie - videogame_concert            0.007409 0.00407 Inf   1.822  0.9090
+ bar_movie - videogame_movie              0.008722 0.00306 Inf   2.847  0.2424
+ bar_movie - videogame_videogame          0.009471 0.00406 Inf   2.333  0.5988
+ bar_videogame - concert_bar             -0.021467 0.00408 Inf  -5.258 &lt;0.0001
+ bar_videogame - concert_concert         -0.024414 0.00408 Inf  -5.986 &lt;0.0001
+ bar_videogame - concert_movie           -0.007575 0.00406 Inf  -1.864  0.8923
+ bar_videogame - concert_videogame       -0.003365 0.00307 Inf  -1.097  0.9994
+ bar_videogame - movie_bar               -0.004896 0.00407 Inf  -1.204  0.9983
+ bar_videogame - movie_concert           -0.006351 0.00406 Inf  -1.562  0.9748
+ bar_videogame - movie_movie             -0.004290 0.00405 Inf  -1.060  0.9996
+ bar_videogame - movie_videogame          0.001558 0.00305 Inf   0.511  1.0000
+ bar_videogame - videogame_bar           -0.002650 0.00408 Inf  -0.649  1.0000
+ bar_videogame - videogame_concert       -0.002146 0.00407 Inf  -0.527  1.0000
+ bar_videogame - videogame_movie         -0.000834 0.00406 Inf  -0.205  1.0000
+ bar_videogame - videogame_videogame     -0.000085 0.00306 Inf  -0.028  1.0000
+ concert_bar - concert_concert           -0.002947 0.00294 Inf  -1.001  0.9998
+ concert_bar - concert_movie              0.013892 0.00292 Inf   4.753  0.0002
+ concert_bar - concert_videogame          0.018102 0.00293 Inf   6.173 &lt;0.0001
+ concert_bar - movie_bar                  0.016571 0.00307 Inf   5.404 &lt;0.0001
+ concert_bar - movie_concert              0.015117 0.00408 Inf   3.705  0.0194
+ concert_bar - movie_movie                0.017177 0.00406 Inf   4.226  0.0025
+ concert_bar - movie_videogame            0.023025 0.00407 Inf   5.657 &lt;0.0001
+ concert_bar - videogame_bar              0.018818 0.00308 Inf   6.105 &lt;0.0001
+ concert_bar - videogame_concert          0.019321 0.00409 Inf   4.725  0.0003
+ concert_bar - videogame_movie            0.020634 0.00407 Inf   5.064 &lt;0.0001
+ concert_bar - videogame_videogame        0.021382 0.00408 Inf   5.239 &lt;0.0001
+ concert_concert - concert_movie          0.016839 0.00292 Inf   5.772 &lt;0.0001
+ concert_concert - concert_videogame      0.021049 0.00293 Inf   7.192 &lt;0.0001
+ concert_concert - movie_bar              0.019518 0.00408 Inf   4.785  0.0002
+ concert_concert - movie_concert          0.018064 0.00306 Inf   5.907 &lt;0.0001
+ concert_concert - movie_movie            0.020124 0.00406 Inf   4.957 &lt;0.0001
+ concert_concert - movie_videogame        0.025972 0.00407 Inf   6.388 &lt;0.0001
+ concert_concert - videogame_bar          0.021765 0.00409 Inf   5.321 &lt;0.0001
+ concert_concert - videogame_concert      0.022268 0.00307 Inf   7.250 &lt;0.0001
+ concert_concert - videogame_movie        0.023581 0.00407 Inf   5.794 &lt;0.0001
+ concert_concert - videogame_videogame    0.024329 0.00408 Inf   5.968 &lt;0.0001
+ concert_movie - concert_videogame        0.004210 0.00291 Inf   1.448  0.9877
+ concert_movie - movie_bar                0.002679 0.00406 Inf   0.659  1.0000
+ concert_movie - movie_concert            0.001225 0.00406 Inf   0.302  1.0000
+ concert_movie - movie_movie              0.003285 0.00305 Inf   1.076  0.9995
+ concert_movie - movie_videogame          0.009133 0.00405 Inf   2.254  0.6579
+ concert_movie - videogame_bar            0.004925 0.00408 Inf   1.208  0.9982
+ concert_movie - videogame_concert        0.005429 0.00407 Inf   1.334  0.9947
+ concert_movie - videogame_movie          0.006742 0.00307 Inf   2.198  0.6986
+ concert_movie - videogame_videogame      0.007490 0.00406 Inf   1.844  0.9005
+ concert_videogame - movie_bar           -0.001531 0.00407 Inf  -0.376  1.0000
+ concert_videogame - movie_concert       -0.002985 0.00407 Inf  -0.734  1.0000
+ concert_videogame - movie_movie         -0.000925 0.00405 Inf  -0.228  1.0000
+ concert_videogame - movie_videogame      0.004923 0.00305 Inf   1.615  0.9660
+ concert_videogame - videogame_bar        0.000716 0.00408 Inf   0.175  1.0000
+ concert_videogame - videogame_concert    0.001219 0.00408 Inf   0.299  1.0000
+ concert_videogame - videogame_movie      0.002532 0.00406 Inf   0.624  1.0000
+ concert_videogame - videogame_videogame  0.003280 0.00306 Inf   1.071  0.9996
+ movie_bar - movie_concert               -0.001454 0.00294 Inf  -0.495  1.0000
+ movie_bar - movie_movie                  0.000606 0.00292 Inf   0.208  1.0000
+ movie_bar - movie_videogame              0.006454 0.00293 Inf   2.206  0.6934
+ movie_bar - videogame_bar                0.002247 0.00306 Inf   0.734  1.0000
+ movie_bar - videogame_concert            0.002750 0.00407 Inf   0.675  1.0000
+ movie_bar - videogame_movie              0.004063 0.00406 Inf   1.001  0.9998
+ movie_bar - videogame_videogame          0.004811 0.00407 Inf   1.183  0.9986
+ movie_concert - movie_movie              0.002061 0.00291 Inf   0.707  1.0000
+ movie_concert - movie_videogame          0.007908 0.00292 Inf   2.706  0.3265
+ movie_concert - videogame_bar            0.003701 0.00408 Inf   0.908  0.9999
+ movie_concert - videogame_concert        0.004204 0.00305 Inf   1.377  0.9926
+ movie_concert - videogame_movie          0.005517 0.00406 Inf   1.360  0.9935
+ movie_concert - videogame_videogame      0.006266 0.00406 Inf   1.542  0.9776
+ movie_movie - movie_videogame            0.005848 0.00290 Inf   2.016  0.8168
+ movie_movie - videogame_bar              0.001640 0.00406 Inf   0.404  1.0000
+ movie_movie - videogame_concert          0.002144 0.00405 Inf   0.529  1.0000
+ movie_movie - videogame_movie            0.003456 0.00305 Inf   1.135  0.9991
+ movie_movie - videogame_videogame        0.004205 0.00405 Inf   1.039  0.9997
+ movie_videogame - videogame_bar         -0.004208 0.00407 Inf  -1.035  0.9997
+ movie_videogame - videogame_concert     -0.003704 0.00406 Inf  -0.912  0.9999
+ movie_videogame - videogame_movie       -0.002392 0.00405 Inf  -0.591  1.0000
+ movie_videogame - videogame_videogame   -0.001643 0.00304 Inf  -0.540  1.0000
+ videogame_bar - videogame_concert        0.000503 0.00295 Inf   0.171  1.0000
+ videogame_bar - videogame_movie          0.001816 0.00292 Inf   0.621  1.0000
+ videogame_bar - videogame_videogame      0.002565 0.00294 Inf   0.874  1.0000
+ videogame_concert - videogame_movie      0.001313 0.00292 Inf   0.450  1.0000
+ videogame_concert - videogame_videogame  0.002061 0.00293 Inf   0.704  1.0000
+ videogame_movie - videogame_videogame    0.000749 0.00291 Inf   0.258  1.0000
+
+Results are averaged over the levels of: genre_comb 
+Degrees-of-freedom method: asymptotic 
+P value adjustment: tukey method for comparing a family of 16 estimates </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb214"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb214-1"><a href="#cb214-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———context × genre cell means (Model 3A):———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———context × genre cell means (Model 3A):———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb216"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb216-1"><a href="#cb216-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3A, <span class="sc">~</span> context_comb <span class="sc">|</span> genre_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 200000' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 200000)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>genre_comb = 80s_80s:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.209 0.00658 Inf     0.196     0.222
+ bar_concert          0.199 0.00655 Inf     0.186     0.212
+ bar_movie            0.194 0.00641 Inf     0.182     0.207
+ bar_videogame        0.180 0.00640 Inf     0.167     0.192
+ concert_bar          0.202 0.00654 Inf     0.189     0.215
+ concert_concert      0.192 0.00652 Inf     0.179     0.205
+ concert_movie        0.180 0.00637 Inf     0.168     0.192
+ concert_videogame    0.171 0.00639 Inf     0.158     0.183
+ movie_bar            0.188 0.00651 Inf     0.175     0.200
+ movie_concert        0.185 0.00651 Inf     0.172     0.198
+ movie_movie          0.183 0.00645 Inf     0.171     0.196
+ movie_videogame      0.163 0.00636 Inf     0.151     0.176
+ videogame_bar        0.182 0.00655 Inf     0.169     0.195
+ videogame_concert    0.176 0.00651 Inf     0.163     0.189
+ videogame_movie      0.173 0.00641 Inf     0.160     0.185
+ videogame_videogame  0.170 0.00629 Inf     0.158     0.182
+
+genre_comb = 80s_Electronic:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.191 0.00655 Inf     0.179     0.204
+ bar_concert          0.190 0.00654 Inf     0.177     0.203
+ bar_movie            0.173 0.00656 Inf     0.160     0.186
+ bar_videogame        0.164 0.00650 Inf     0.151     0.176
+ concert_bar          0.183 0.00658 Inf     0.170     0.196
+ concert_concert      0.194 0.00645 Inf     0.181     0.207
+ concert_movie        0.170 0.00649 Inf     0.157     0.182
+ concert_videogame    0.162 0.00643 Inf     0.149     0.174
+ movie_bar            0.163 0.00655 Inf     0.150     0.175
+ movie_concert        0.170 0.00650 Inf     0.157     0.183
+ movie_movie          0.168 0.00652 Inf     0.156     0.181
+ movie_videogame      0.153 0.00644 Inf     0.140     0.165
+ videogame_bar        0.167 0.00648 Inf     0.154     0.180
+ videogame_concert    0.178 0.00639 Inf     0.166     0.191
+ videogame_movie      0.176 0.00639 Inf     0.163     0.188
+ videogame_videogame  0.158 0.00637 Inf     0.146     0.171
+
+genre_comb = 80s_Jazz:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.195 0.00636 Inf     0.182     0.207
+ bar_concert          0.196 0.00645 Inf     0.183     0.209
+ bar_movie            0.199 0.00635 Inf     0.187     0.212
+ bar_videogame        0.181 0.00644 Inf     0.169     0.194
+ concert_bar          0.190 0.00637 Inf     0.178     0.203
+ concert_concert      0.193 0.00646 Inf     0.181     0.206
+ concert_movie        0.185 0.00634 Inf     0.173     0.198
+ concert_videogame    0.183 0.00638 Inf     0.171     0.196
+ movie_bar            0.170 0.00635 Inf     0.158     0.183
+ movie_concert        0.178 0.00644 Inf     0.165     0.190
+ movie_movie          0.171 0.00630 Inf     0.158     0.183
+ movie_videogame      0.171 0.00639 Inf     0.159     0.184
+ videogame_bar        0.168 0.00634 Inf     0.156     0.181
+ videogame_concert    0.168 0.00637 Inf     0.156     0.181
+ videogame_movie      0.181 0.00624 Inf     0.169     0.194
+ videogame_videogame  0.174 0.00635 Inf     0.161     0.186
+
+genre_comb = 80s_Metal:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.176 0.00655 Inf     0.163     0.189
+ bar_concert          0.176 0.00641 Inf     0.163     0.188
+ bar_movie            0.167 0.00646 Inf     0.154     0.179
+ bar_videogame        0.146 0.00657 Inf     0.134     0.159
+ concert_bar          0.185 0.00644 Inf     0.173     0.198
+ concert_concert      0.184 0.00639 Inf     0.171     0.196
+ concert_movie        0.168 0.00647 Inf     0.156     0.181
+ concert_videogame    0.152 0.00649 Inf     0.139     0.164
+ movie_bar            0.159 0.00643 Inf     0.146     0.171
+ movie_concert        0.165 0.00637 Inf     0.153     0.178
+ movie_movie          0.156 0.00639 Inf     0.144     0.169
+ movie_videogame      0.131 0.00644 Inf     0.118     0.143
+ videogame_bar        0.162 0.00644 Inf     0.149     0.174
+ videogame_concert    0.159 0.00630 Inf     0.147     0.172
+ videogame_movie      0.159 0.00642 Inf     0.147     0.172
+ videogame_videogame  0.146 0.00645 Inf     0.133     0.158
+
+genre_comb = Electronic_80s:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.185 0.00664 Inf     0.172     0.198
+ bar_concert          0.177 0.00649 Inf     0.164     0.189
+ bar_movie            0.163 0.00640 Inf     0.151     0.176
+ bar_videogame        0.168 0.00640 Inf     0.156     0.181
+ concert_bar          0.193 0.00669 Inf     0.180     0.206
+ concert_concert      0.183 0.00664 Inf     0.170     0.196
+ concert_movie        0.172 0.00645 Inf     0.159     0.185
+ concert_videogame    0.174 0.00645 Inf     0.161     0.187
+ movie_bar            0.171 0.00648 Inf     0.158     0.184
+ movie_concert        0.171 0.00650 Inf     0.159     0.184
+ movie_movie          0.167 0.00637 Inf     0.154     0.179
+ movie_videogame      0.172 0.00632 Inf     0.160     0.184
+ videogame_bar        0.163 0.00654 Inf     0.151     0.176
+ videogame_concert    0.158 0.00644 Inf     0.145     0.171
+ videogame_movie      0.152 0.00641 Inf     0.139     0.165
+ videogame_videogame  0.168 0.00631 Inf     0.155     0.180
+
+genre_comb = Electronic_Electronic:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.179 0.00661 Inf     0.166     0.192
+ bar_concert          0.185 0.00647 Inf     0.172     0.197
+ bar_movie            0.181 0.00647 Inf     0.168     0.194
+ bar_videogame        0.168 0.00642 Inf     0.155     0.180
+ concert_bar          0.195 0.00661 Inf     0.182     0.208
+ concert_concert      0.197 0.00663 Inf     0.184     0.210
+ concert_movie        0.173 0.00667 Inf     0.160     0.186
+ concert_videogame    0.174 0.00646 Inf     0.162     0.187
+ movie_bar            0.178 0.00650 Inf     0.165     0.190
+ movie_concert        0.185 0.00643 Inf     0.172     0.197
+ movie_movie          0.187 0.00639 Inf     0.175     0.200
+ movie_videogame      0.172 0.00640 Inf     0.159     0.184
+ videogame_bar        0.170 0.00653 Inf     0.157     0.183
+ videogame_concert    0.174 0.00647 Inf     0.162     0.187
+ videogame_movie      0.183 0.00650 Inf     0.170     0.195
+ videogame_videogame  0.175 0.00639 Inf     0.162     0.187
+
+genre_comb = Electronic_Jazz:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.177 0.00638 Inf     0.164     0.189
+ bar_concert          0.176 0.00639 Inf     0.163     0.188
+ bar_movie            0.174 0.00638 Inf     0.162     0.187
+ bar_videogame        0.174 0.00638 Inf     0.162     0.187
+ concert_bar          0.182 0.00646 Inf     0.169     0.194
+ concert_concert      0.188 0.00651 Inf     0.175     0.201
+ concert_movie        0.174 0.00643 Inf     0.162     0.187
+ concert_videogame    0.174 0.00651 Inf     0.162     0.187
+ movie_bar            0.161 0.00632 Inf     0.148     0.173
+ movie_concert        0.163 0.00639 Inf     0.151     0.176
+ movie_movie          0.171 0.00623 Inf     0.159     0.184
+ movie_videogame      0.170 0.00636 Inf     0.157     0.182
+ videogame_bar        0.153 0.00632 Inf     0.141     0.166
+ videogame_concert    0.155 0.00642 Inf     0.143     0.168
+ videogame_movie      0.156 0.00626 Inf     0.144     0.168
+ videogame_videogame  0.164 0.00637 Inf     0.151     0.176
+
+genre_comb = Electronic_Metal:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.176 0.00642 Inf     0.163     0.188
+ bar_concert          0.174 0.00639 Inf     0.162     0.187
+ bar_movie            0.169 0.00642 Inf     0.156     0.181
+ bar_videogame        0.155 0.00652 Inf     0.142     0.168
+ concert_bar          0.182 0.00663 Inf     0.169     0.195
+ concert_concert      0.186 0.00651 Inf     0.173     0.198
+ concert_movie        0.169 0.00649 Inf     0.156     0.182
+ concert_videogame    0.164 0.00656 Inf     0.151     0.177
+ movie_bar            0.178 0.00641 Inf     0.165     0.190
+ movie_concert        0.177 0.00633 Inf     0.165     0.189
+ movie_movie          0.175 0.00639 Inf     0.162     0.188
+ movie_videogame      0.168 0.00643 Inf     0.155     0.181
+ videogame_bar        0.173 0.00638 Inf     0.161     0.186
+ videogame_concert    0.176 0.00632 Inf     0.163     0.188
+ videogame_movie      0.174 0.00634 Inf     0.162     0.187
+ videogame_videogame  0.175 0.00647 Inf     0.163     0.188
+
+genre_comb = Jazz_80s:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.201 0.00646 Inf     0.188     0.213
+ bar_concert          0.186 0.00648 Inf     0.173     0.199
+ bar_movie            0.173 0.00631 Inf     0.161     0.186
+ bar_videogame        0.173 0.00627 Inf     0.161     0.185
+ concert_bar          0.201 0.00653 Inf     0.188     0.213
+ concert_concert      0.198 0.00649 Inf     0.185     0.210
+ concert_movie        0.186 0.00642 Inf     0.173     0.198
+ concert_videogame    0.171 0.00634 Inf     0.158     0.183
+ movie_bar            0.184 0.00640 Inf     0.172     0.197
+ movie_concert        0.181 0.00638 Inf     0.168     0.193
+ movie_movie          0.183 0.00618 Inf     0.171     0.195
+ movie_videogame      0.166 0.00618 Inf     0.154     0.178
+ videogame_bar        0.198 0.00654 Inf     0.185     0.211
+ videogame_concert    0.181 0.00651 Inf     0.168     0.193
+ videogame_movie      0.176 0.00641 Inf     0.164     0.189
+ videogame_videogame  0.178 0.00634 Inf     0.165     0.190
+
+genre_comb = Jazz_Electronic:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.173 0.00644 Inf     0.161     0.186
+ bar_concert          0.185 0.00639 Inf     0.172     0.197
+ bar_movie            0.162 0.00639 Inf     0.150     0.175
+ bar_videogame        0.157 0.00635 Inf     0.145     0.170
+ concert_bar          0.181 0.00656 Inf     0.168     0.194
+ concert_concert      0.188 0.00647 Inf     0.175     0.201
+ concert_movie        0.174 0.00645 Inf     0.162     0.187
+ concert_videogame    0.166 0.00637 Inf     0.154     0.179
+ movie_bar            0.169 0.00641 Inf     0.156     0.181
+ movie_concert        0.172 0.00628 Inf     0.160     0.184
+ movie_movie          0.160 0.00636 Inf     0.148     0.173
+ movie_videogame      0.157 0.00629 Inf     0.145     0.170
+ videogame_bar        0.179 0.00651 Inf     0.167     0.192
+ videogame_concert    0.183 0.00644 Inf     0.170     0.195
+ videogame_movie      0.172 0.00639 Inf     0.159     0.184
+ videogame_videogame  0.163 0.00637 Inf     0.151     0.176
+
+genre_comb = Jazz_Jazz:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.193 0.00629 Inf     0.180     0.205
+ bar_concert          0.192 0.00632 Inf     0.179     0.204
+ bar_movie            0.194 0.00621 Inf     0.182     0.206
+ bar_videogame        0.181 0.00630 Inf     0.168     0.193
+ concert_bar          0.195 0.00637 Inf     0.182     0.207
+ concert_concert      0.198 0.00638 Inf     0.185     0.210
+ concert_movie        0.187 0.00628 Inf     0.175     0.199
+ concert_videogame    0.186 0.00636 Inf     0.174     0.199
+ movie_bar            0.182 0.00623 Inf     0.169     0.194
+ movie_concert        0.185 0.00623 Inf     0.172     0.197
+ movie_movie          0.187 0.00609 Inf     0.175     0.199
+ movie_videogame      0.184 0.00625 Inf     0.172     0.196
+ videogame_bar        0.194 0.00633 Inf     0.182     0.207
+ videogame_concert    0.185 0.00636 Inf     0.173     0.198
+ videogame_movie      0.189 0.00622 Inf     0.177     0.201
+ videogame_videogame  0.185 0.00632 Inf     0.173     0.198
+
+genre_comb = Jazz_Metal:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.173 0.00632 Inf     0.160     0.185
+ bar_concert          0.170 0.00628 Inf     0.158     0.182
+ bar_movie            0.155 0.00631 Inf     0.142     0.167
+ bar_videogame        0.133 0.00634 Inf     0.121     0.146
+ concert_bar          0.180 0.00648 Inf     0.168     0.193
+ concert_concert      0.185 0.00636 Inf     0.173     0.198
+ concert_movie        0.159 0.00637 Inf     0.146     0.171
+ concert_videogame    0.154 0.00647 Inf     0.141     0.166
+ movie_bar            0.165 0.00625 Inf     0.153     0.177
+ movie_concert        0.159 0.00622 Inf     0.146     0.171
+ movie_movie          0.149 0.00622 Inf     0.137     0.161
+ movie_videogame      0.137 0.00628 Inf     0.125     0.149
+ videogame_bar        0.171 0.00639 Inf     0.158     0.183
+ videogame_concert    0.169 0.00632 Inf     0.157     0.182
+ videogame_movie      0.161 0.00634 Inf     0.148     0.173
+ videogame_videogame  0.143 0.00647 Inf     0.130     0.155
+
+genre_comb = Metal_80s:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.178 0.00659 Inf     0.166     0.191
+ bar_concert          0.176 0.00653 Inf     0.163     0.189
+ bar_movie            0.163 0.00640 Inf     0.151     0.176
+ bar_videogame        0.164 0.00636 Inf     0.151     0.176
+ concert_bar          0.185 0.00653 Inf     0.172     0.198
+ concert_concert      0.179 0.00644 Inf     0.166     0.192
+ concert_movie        0.160 0.00638 Inf     0.148     0.173
+ concert_videogame    0.166 0.00636 Inf     0.153     0.178
+ movie_bar            0.163 0.00658 Inf     0.150     0.176
+ movie_concert        0.160 0.00661 Inf     0.147     0.173
+ movie_movie          0.154 0.00646 Inf     0.142     0.167
+ movie_videogame      0.161 0.00638 Inf     0.148     0.173
+ videogame_bar        0.149 0.00680 Inf     0.135     0.162
+ videogame_concert    0.142 0.00672 Inf     0.128     0.155
+ videogame_movie      0.133 0.00646 Inf     0.120     0.146
+ videogame_videogame  0.157 0.00647 Inf     0.145     0.170
+
+genre_comb = Metal_Electronic:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.173 0.00648 Inf     0.161     0.186
+ bar_concert          0.187 0.00647 Inf     0.174     0.199
+ bar_movie            0.172 0.00651 Inf     0.159     0.185
+ bar_videogame        0.161 0.00646 Inf     0.149     0.174
+ concert_bar          0.175 0.00645 Inf     0.162     0.187
+ concert_concert      0.196 0.00644 Inf     0.184     0.209
+ concert_movie        0.165 0.00640 Inf     0.152     0.177
+ concert_videogame    0.168 0.00638 Inf     0.155     0.180
+ movie_bar            0.158 0.00659 Inf     0.145     0.171
+ movie_concert        0.166 0.00653 Inf     0.153     0.179
+ movie_movie          0.168 0.00655 Inf     0.156     0.181
+ movie_videogame      0.171 0.00644 Inf     0.158     0.183
+ videogame_bar        0.153 0.00663 Inf     0.140     0.166
+ videogame_concert    0.161 0.00662 Inf     0.148     0.174
+ videogame_movie      0.164 0.00662 Inf     0.151     0.177
+ videogame_videogame  0.162 0.00657 Inf     0.149     0.175
+
+genre_comb = Metal_Jazz:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.170 0.00637 Inf     0.157     0.182
+ bar_concert          0.173 0.00643 Inf     0.160     0.185
+ bar_movie            0.173 0.00626 Inf     0.161     0.186
+ bar_videogame        0.169 0.00638 Inf     0.156     0.181
+ concert_bar          0.164 0.00632 Inf     0.151     0.176
+ concert_concert      0.182 0.00636 Inf     0.169     0.194
+ concert_movie        0.159 0.00621 Inf     0.147     0.171
+ concert_videogame    0.168 0.00634 Inf     0.155     0.180
+ movie_bar            0.151 0.00643 Inf     0.138     0.163
+ movie_concert        0.153 0.00649 Inf     0.140     0.166
+ movie_movie          0.152 0.00632 Inf     0.140     0.165
+ movie_videogame      0.162 0.00642 Inf     0.149     0.174
+ videogame_bar        0.137 0.00653 Inf     0.124     0.149
+ videogame_concert    0.142 0.00662 Inf     0.129     0.155
+ videogame_movie      0.141 0.00641 Inf     0.128     0.153
+ videogame_videogame  0.149 0.00649 Inf     0.136     0.162
+
+genre_comb = Metal_Metal:
+ context_comb        emmean      SE  df asymp.LCL asymp.UCL
+ bar_bar              0.196 0.00643 Inf     0.184     0.209
+ bar_concert          0.190 0.00637 Inf     0.177     0.202
+ bar_movie            0.184 0.00638 Inf     0.172     0.197
+ bar_videogame        0.171 0.00645 Inf     0.158     0.183
+ concert_bar          0.197 0.00637 Inf     0.184     0.209
+ concert_concert      0.195 0.00630 Inf     0.182     0.207
+ concert_movie        0.185 0.00634 Inf     0.172     0.197
+ concert_videogame    0.167 0.00642 Inf     0.155     0.180
+ movie_bar            0.187 0.00648 Inf     0.174     0.199
+ movie_concert        0.179 0.00639 Inf     0.166     0.191
+ movie_movie          0.181 0.00645 Inf     0.168     0.193
+ movie_videogame      0.184 0.00648 Inf     0.171     0.197
+ videogame_bar        0.168 0.00659 Inf     0.155     0.181
+ videogame_concert    0.171 0.00648 Inf     0.159     0.184
+ videogame_movie      0.169 0.00654 Inf     0.156     0.182
+ videogame_videogame  0.181 0.00664 Inf     0.168     0.194
+
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb220"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb220-1"><a href="#cb220-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———ESTIMATED MARGINAL MEANS — Model 3B (simplified, full data)———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———ESTIMATED MARGINAL MEANS — Model 3B (simplified, full data)———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb222"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb222-1"><a href="#cb222-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"(pairwise context contrasts, Tukey adjustment)</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>(pairwise context contrasts, Tukey adjustment)</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb224"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb224-1"><a href="#cb224-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3B, pairwise <span class="sc">~</span> context_i, <span class="at">adjust =</span> <span class="st">"tukey"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>NOTE: Results may be misleading due to involvement in interactions</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>$emmeans
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.178 0.00219 Inf     0.174     0.183
+ concert    0.180 0.00219 Inf     0.176     0.184
+ movie      0.171 0.00217 Inf     0.166     0.175
+ videogame  0.166 0.00218 Inf     0.162     0.171
+
+Results are averaged over the levels of: genre_i 
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 
+
+$contrasts
+ contrast            estimate      SE  df z.ratio p.value
+ bar - concert       -0.00146 0.00280 Inf  -0.523  0.9536
+ bar - movie          0.00769 0.00278 Inf   2.769  0.0287
+ bar - videogame      0.01198 0.00279 Inf   4.301  0.0001
+ concert - movie      0.00915 0.00278 Inf   3.294  0.0055
+ concert - videogame  0.01345 0.00279 Inf   4.823 &lt;0.0001
+ movie - videogame    0.00429 0.00277 Inf   1.549  0.4080
+
+Results are averaged over the levels of: genre_i 
+Degrees-of-freedom method: asymptotic 
+P value adjustment: tukey method for comparing a family of 4 estimates </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb229"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb229-1"><a href="#cb229-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">———context_i × genre_i cell means (Model 3B):———</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+———context_i × genre_i cell means (Model 3B):———</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb231"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb231-1"><a href="#cb231-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">emmeans</span>(model3B, <span class="sc">~</span> context_i <span class="sc">|</span> genre_i))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'pbkrtest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(pbkrtest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Note: D.f. calculations have been disabled because the number of observations exceeds 3000.
+To enable adjustments, add the argument 'lmerTest.limit = 1919820' (or larger)
+[or, globally, 'set emm_options(lmerTest.limit = 1919820)' or larger];
+but be warned that this may result in large computation time and memory use.</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>genre_i = 80s:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.186 0.00413 Inf     0.178     0.194
+ concert    0.181 0.00410 Inf     0.173     0.189
+ movie      0.169 0.00404 Inf     0.161     0.177
+ videogame  0.169 0.00400 Inf     0.162     0.177
+
+genre_i = Electronic:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.174 0.00409 Inf     0.166     0.182
+ concert    0.181 0.00413 Inf     0.173     0.189
+ movie      0.175 0.00406 Inf     0.167     0.183
+ videogame  0.164 0.00402 Inf     0.156     0.172
+
+genre_i = Jazz:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.177 0.00397 Inf     0.169     0.184
+ concert    0.181 0.00404 Inf     0.173     0.189
+ movie      0.172 0.00390 Inf     0.164     0.179
+ videogame  0.177 0.00401 Inf     0.169     0.185
+
+genre_i = Metal:
+ context_i emmean      SE  df asymp.LCL asymp.UCL
+ bar        0.176 0.00405 Inf     0.168     0.184
+ concert    0.177 0.00399 Inf     0.169     0.185
+ movie      0.167 0.00407 Inf     0.159     0.175
+ videogame  0.156 0.00413 Inf     0.147     0.164
+
+Degrees-of-freedom method: asymptotic 
+Confidence level used: 0.95 </code></pre>
+</div>
+</div>
+</section>
+<section id="random-forest" class="level3">
+<h3 class="anchored" data-anchor-id="random-forest">Random Forest</h3>
+<p><em>Question:</em> <em>how well can context condition be recovered from similarity scores alone?</em></p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb235"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb235-1"><a href="#cb235-1" aria-hidden="true" tabindex="-1"></a>sim_rf <span class="ot">&lt;-</span> sim_df[sim_df<span class="sc">$</span>condition <span class="sc">==</span> <span class="st">"Dclip_Scontext"</span>, ]</span>
+<span id="cb235-2"><a href="#cb235-2" aria-hidden="true" tabindex="-1"></a>sim_rf<span class="sc">$</span>context_comb <span class="ot">&lt;-</span> <span class="fu">factor</span>(sim_rf<span class="sc">$</span>context_comb)</span>
+<span id="cb235-3"><a href="#cb235-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb235-4"><a href="#cb235-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Downsample to avoid memory limits — stratified sample, equal per context class.</span></span>
+<span id="cb235-5"><a href="#cb235-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 50k pairs total (12.5k per class) is ample for a single-predictor classifier.</span></span>
+<span id="cb235-6"><a href="#cb235-6" aria-hidden="true" tabindex="-1"></a>MAX_PER_CLASS <span class="ot">&lt;-</span> <span class="dv">12500</span></span>
+<span id="cb235-7"><a href="#cb235-7" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">41100</span>)</span>
+<span id="cb235-8"><a href="#cb235-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb235-9"><a href="#cb235-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Compute the actual cap outside the pipe (min across all class sizes vs MAX_PER_CLASS)</span></span>
+<span id="cb235-10"><a href="#cb235-10" aria-hidden="true" tabindex="-1"></a>class_cap <span class="ot">&lt;-</span> <span class="fu">min</span>(MAX_PER_CLASS, <span class="fu">min</span>(<span class="fu">table</span>(sim_rf<span class="sc">$</span>context_comb)))</span>
+<span id="cb235-11"><a href="#cb235-11" aria-hidden="true" tabindex="-1"></a>sim_rf <span class="ot">&lt;-</span> sim_rf <span class="sc">|&gt;</span></span>
+<span id="cb235-12"><a href="#cb235-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(context_comb) <span class="sc">|&gt;</span></span>
+<span id="cb235-13"><a href="#cb235-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">slice_sample</span>(<span class="at">n =</span> class_cap) <span class="sc">|&gt;</span></span>
+<span id="cb235-14"><a href="#cb235-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>() <span class="sc">|&gt;</span></span>
+<span id="cb235-15"><a href="#cb235-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.data.frame</span>()</span>
+<span id="cb235-16"><a href="#cb235-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb235-17"><a href="#cb235-17" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"Downsampled to %d pairs for Random Forest (%d per class max)</span><span class="sc">\n</span><span class="st">"</span>,</span>
+<span id="cb235-18"><a href="#cb235-18" aria-hidden="true" tabindex="-1"></a>            <span class="fu">nrow</span>(sim_rf), MAX_PER_CLASS))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Downsampled to 50000 pairs for Random Forest (12500 per class max)</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb237"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb237-1"><a href="#cb237-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">table</span>(sim_rf<span class="sc">$</span>context_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+            bar_bar     concert_concert         movie_movie videogame_videogame 
+              12500               12500               12500               12500 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb239"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb239-1"><a href="#cb239-1" aria-hidden="true" tabindex="-1"></a>rf_model <span class="ot">&lt;-</span> <span class="fu">randomForest</span>(context_comb <span class="sc">~</span> similarity,</span>
+<span id="cb239-2"><a href="#cb239-2" aria-hidden="true" tabindex="-1"></a>                          <span class="at">data      =</span> sim_rf,</span>
+<span id="cb239-3"><a href="#cb239-3" aria-hidden="true" tabindex="-1"></a>                          <span class="at">ntree     =</span> <span class="dv">500</span>,</span>
+<span id="cb239-4"><a href="#cb239-4" aria-hidden="true" tabindex="-1"></a>                          <span class="at">importance =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb239-5"><a href="#cb239-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb239-6"><a href="#cb239-6" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">RANDOM FOREST: context_comb ~ similarity</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+RANDOM FOREST: context_comb ~ similarity</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb241"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb241-1"><a href="#cb241-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(rf_model)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Call:
+ randomForest(formula = context_comb ~ similarity, data = sim_rf,      ntree = 500, importance = TRUE) 
+               Type of random forest: classification
+                     Number of trees: 500
+No. of variables tried at each split: 1
+
+        OOB estimate of  error rate: 74.53%
+Confusion matrix:
+                    bar_bar concert_concert movie_movie videogame_videogame
+bar_bar                3160            3130        3083                3127
+concert_concert        3153            3217        3107                3023
+movie_movie            3149            2979        3223                3149
+videogame_videogame    3121            3138        3105                3136
+                    class.error
+bar_bar                 0.74720
+concert_concert         0.74264
+movie_movie             0.74216
+videogame_videogame     0.74912</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb243"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb243-1"><a href="#cb243-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">OOB classification rate:"</span>,</span>
+<span id="cb243-2"><a href="#cb243-2" aria-hidden="true" tabindex="-1"></a>    <span class="fu">round</span>(<span class="dv">1</span> <span class="sc">-</span> rf_model<span class="sc">$</span>err.rate[<span class="dv">500</span>, <span class="st">"OOB"</span>], <span class="dv">3</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+OOB classification rate: 0.255 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb245"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb245-1"><a href="#cb245-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Variable importance:</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Variable importance:</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb247"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb247-1"><a href="#cb247-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">importance</span>(rf_model))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            bar_bar concert_concert movie_movie videogame_videogame
+similarity 3.979473        21.32254    19.06576            3.140812
+           MeanDecreaseAccuracy MeanDecreaseGini
+similarity             20.69527         37481.05</code></pre>
+</div>
+</div>
+</section>
+<section id="linear-discriminant-analysis" class="level3">
+<h3 class="anchored" data-anchor-id="linear-discriminant-analysis">Linear Discriminant Analysis</h3>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb249"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb249-1"><a href="#cb249-1" aria-hidden="true" tabindex="-1"></a><span class="co"># ── Linear Discriminant Analysis: context from similarity ─────────────────────</span></span>
+<span id="cb249-2"><a href="#cb249-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Uses the same downsampled frame as the Random Forest above for consistency.</span></span>
+<span id="cb249-3"><a href="#cb249-3" aria-hidden="true" tabindex="-1"></a>lda_model <span class="ot">&lt;-</span> MASS<span class="sc">::</span><span class="fu">lda</span>(context_comb <span class="sc">~</span> similarity, <span class="at">data =</span> sim_rf)</span>
+<span id="cb249-4"><a href="#cb249-4" aria-hidden="true" tabindex="-1"></a>lda_pred  <span class="ot">&lt;-</span> <span class="fu">predict</span>(lda_model, sim_rf)</span>
+<span id="cb249-5"><a href="#cb249-5" aria-hidden="true" tabindex="-1"></a>lda_acc   <span class="ot">&lt;-</span> <span class="fu">mean</span>(lda_pred<span class="sc">$</span>class <span class="sc">==</span> sim_rf<span class="sc">$</span>context_comb)</span>
+<span id="cb249-6"><a href="#cb249-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb249-7"><a href="#cb249-7" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"LDA: context_comb ~ similarity</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>LDA: context_comb ~ similarity</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb251"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb251-1"><a href="#cb251-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(lda_model)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Call:
+lda(context_comb ~ similarity, data = sim_rf)
+
+Prior probabilities of groups:
+            bar_bar     concert_concert         movie_movie videogame_videogame 
+               0.25                0.25                0.25                0.25 
+
+Group means:
+                    similarity
+bar_bar              0.1815665
+concert_concert      0.1871982
+movie_movie          0.1686380
+videogame_videogame  0.1635675
+
+Coefficients of linear discriminants:
+               LD1
+similarity 9.06441</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb253"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb253-1"><a href="#cb253-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">LDA classification accuracy: %.3f</span><span class="sc">\n</span><span class="st">"</span>, lda_acc))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+LDA classification accuracy: 0.272</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb255"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb255-1"><a href="#cb255-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">Confusion matrix:</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Confusion matrix:</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb257"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb257-1"><a href="#cb257-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="fu">table</span>(<span class="at">Predicted =</span> lda_pred<span class="sc">$</span>class, <span class="at">Actual =</span> sim_rf<span class="sc">$</span>context_comb))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>                     Actual
+Predicted             bar_bar concert_concert movie_movie videogame_videogame
+  bar_bar                 448             396         397                 401
+  concert_concert        5632            5958        5159                4838
+  movie_movie             424             394         387                 432
+  videogame_videogame    5996            5752        6557                6829</code></pre>
+</div>
+</div>
 </section>
 </section>
 <section id="rq1-does-context-shape-mimc-similarity" class="level2">
@@ -587,9 +2237,9 @@ Saved combined advantage table</code></pre>
 <pre><code>(0.0, 0.2620939288332975)</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>[&lt;matplotlib.lines.Line2D object at 0x304de4af0&gt;]
+<pre><code>[&lt;matplotlib.lines.Line2D object at 0x30b7b0700&gt;]
 Text(1, 0.21712474232709922, '***')
-[&lt;matplotlib.lines.Line2D object at 0x304de4f10&gt;]
+[&lt;matplotlib.lines.Line2D object at 0x30b7b0310&gt;]
 Text(1.5, 0.2421247423270992, '***')
 (0.0, 0.2891247423270992)</code></pre>
 </div>
@@ -675,8 +2325,8 @@ Saved within-genre clip vs context moderator table</code></pre>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;BarContainer object of 4 artists&gt;
-&lt;matplotlib.lines.Line2D object at 0x304ef0370&gt;
-[&lt;matplotlib.axis.YTick object at 0x304e7dd30&gt;, &lt;matplotlib.axis.YTick object at 0x304e7dc40&gt;, &lt;matplotlib.axis.YTick object at 0x304e7e7c0&gt;, &lt;matplotlib.axis.YTick object at 0x304eff610&gt;]
+&lt;matplotlib.lines.Line2D object at 0x30c0df370&gt;
+[&lt;matplotlib.axis.YTick object at 0x30c05a4c0&gt;, &lt;matplotlib.axis.YTick object at 0x30c05a460&gt;, &lt;matplotlib.axis.YTick object at 0x30c071df0&gt;, &lt;matplotlib.axis.YTick object at 0x30c1a58b0&gt;]
 [Text(0, 0, 'ELECTRONIC'), Text(0, 1, '80S'), Text(0, 2, 'JAZZ'), Text(0, 3, 'METAL')]
 Text(0.5, 0, 'Framing Gain\n(Dclip_Scontext − Dclip_Dcontext_Dgenre)')
 Text(0.5, 1.0, 'A. Genre Framing Susceptibility\n(Higher = More Context-Sensitive)')
@@ -685,10 +2335,10 @@ Text(0.014774078651812515, 1, '***')
 Text(0.018849978190313865, 2, '***')
 Text(0.02719670268517116, 3, '***')
 &lt;BarContainer object of 4 artists&gt;
-&lt;matplotlib.lines.Line2D object at 0x304f03cd0&gt;
-&lt;matplotlib.lines.Line2D object at 0x304f109d0&gt;
-&lt;matplotlib.lines.Line2D object at 0x304f10c70&gt;
-[&lt;matplotlib.axis.YTick object at 0x304eca100&gt;, &lt;matplotlib.axis.YTick object at 0x304ec2a60&gt;, &lt;matplotlib.axis.YTick object at 0x304eb8f10&gt;, &lt;matplotlib.axis.YTick object at 0x304f229d0&gt;]
+&lt;matplotlib.lines.Line2D object at 0x30c1acf70&gt;
+&lt;matplotlib.lines.Line2D object at 0x30c1b8c70&gt;
+&lt;matplotlib.lines.Line2D object at 0x30c1b8f10&gt;
+[&lt;matplotlib.axis.YTick object at 0x30b4d6880&gt;, &lt;matplotlib.axis.YTick object at 0x30c0b2ee0&gt;, &lt;matplotlib.axis.YTick object at 0x30c0b2430&gt;, &lt;matplotlib.axis.YTick object at 0x30c1c5c70&gt;]
 [Text(0, 0, 'METAL'), Text(0, 1, '80S'), Text(0, 2, 'ELECTRONIC'), Text(0, 3, 'JAZZ')]
 Text(0.5, 0, 'Clip Mean − Context Mean\n(+ve = Clip dominant; −ve = Context dominant)')
 Text(0.5, 1.0, 'B. Clip vs Context Dominance by Genre\n(Sclip_Dcontext vs Dclip_Scontext)')
@@ -696,7 +2346,7 @@ Text(-0.008969781397134165, 0, '***')
 Text(0.01303867316551582, 1, '***')
 Text(0.023025473377718233, 2, '***')
 Text(0.02447749307625743, 3, '***')
-&lt;matplotlib.legend.Legend object at 0x304f321f0&gt;
+&lt;matplotlib.legend.Legend object at 0x30c1d6490&gt;
 Text(0.5, 0.98, 'RQ3: Does Genre Moderate the Context Effect?  [all-MiniLM-L6-v2 — individual]')
 Saved: RQ3 genre moderation plot</code></pre>
 </div>
@@ -848,7 +2498,7 @@ Text(0.5, 1.0, 'B. Genre Similarity Matrix\n(Diagonal = Within-Genre)')</code></
 <pre><code>Text(0.5, 1.0, 't-SNE: Individual MIMC Embeddings  [all-MiniLM-L6-v2]')</code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;matplotlib.legend.Legend object at 0x3070f83d0&gt;</code></pre>
+<pre><code>&lt;matplotlib.legend.Legend object at 0x31be59940&gt;</code></pre>
 </div>
 <div class="cell-output-display">
 <div>
@@ -862,19 +2512,18 @@ Text(0.5, 1.0, 'B. Genre Similarity Matrix\n(Diagonal = Within-Genre)')</code></
 </div>
 </div>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb108"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb108-1"><a href="#cb108-1" aria-hidden="true" tabindex="-1"></a><span class="fu">install.packages</span>(<span class="st">"renv"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb332"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb332-1"><a href="#cb332-1" aria-hidden="true" tabindex="-1"></a><span class="fu">install.packages</span>(<span class="st">"renv"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>- Querying repositories for available source packages ... Done!
-The following package(s) will be installed:
+<pre><code>The following package(s) will be installed:
 - renv [1.2.2]
 These packages will be installed into "~/Library/Caches/org.R-project.R/R/renv/library/NLP_analyses-89bf1a08/macos/R-4.5/aarch64-apple-darwin20".
 
 # Installing packages --------------------------------------------------------
 [32m✔[0m renv 1.2.2                               [linked from cache]
-Successfully installed 1 package in 1.7 milliseconds.</code></pre>
+Successfully installed 1 package in 2.9 milliseconds.</code></pre>
 </div>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb110"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb110-1"><a href="#cb110-1" aria-hidden="true" tabindex="-1"></a>renv<span class="sc">::</span><span class="fu">init</span>()</span>
-<span id="cb110-2"><a href="#cb110-2" aria-hidden="true" tabindex="-1"></a>renv<span class="sc">::</span><span class="fu">snapshot</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb334"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb334-1"><a href="#cb334-1" aria-hidden="true" tabindex="-1"></a>renv<span class="sc">::</span><span class="fu">init</span>()</span>
+<span id="cb334-2"><a href="#cb334-2" aria-hidden="true" tabindex="-1"></a>renv<span class="sc">::</span><span class="fu">snapshot</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>- The lockfile is already up to date.</code></pre>
 </div>
