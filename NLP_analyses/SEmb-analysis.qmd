@@ -519,7 +519,7 @@ cat("———MODEL 1: similarity ~ context_comb + genre_comb
                + (1 | item_i) + (1 | item_j), + (1 | clip_comb)———\n")
 
 model1 <- lmer(similarity ~ context_comb + genre_comb 
-               + (1 | item_i) + (1 | item_j) + (1 | clip_comb),
+               + (1 | item_i) + (1 | item_j),
                data = sim_df, REML = FALSE)
 
 print(anova(model1))
@@ -529,8 +529,10 @@ cat("\n———Pseudo-R² (Nakagawa & Schielzeth), variance explained:———
 print(MuMIn::r.squaredGLMM(model1))
 cat("\n———EMMean, context combos with CI———\n")
 print(emmeans(model1, ~ context_comb))   # mean per context combination with CI
+plot(emmeans(model1, ~ context_comb))
 cat("\n———EMMean, genre combos with CI———\n")
 print(emmeans(model1, ~ genre_comb))     # mean per genre combination with CI
+plot(emmeans(model1, ~ genre_comb))
 cat("\n———random effects variance check———\n")
 print(summary(model1)$varcor)   # random effects variance only, no fixed effect coefficients
 
@@ -546,7 +548,7 @@ print(summary(model1)$varcor)   # random effects variance only, no fixed effect 
 cat("\n———MODEL 2: + believability_pair———\n")
 
 model2 <- lmer(similarity ~ context_comb + genre_comb + believability_pair 
-               + (1 | item_i) + (1 | item_j) + (1 | clip_comb),
+               + (1 | item_i) + (1 | item_j),
                data = sim_df, REML = FALSE)
 
 print(anova(model2))
