@@ -1,7 +1,7 @@
 ---
 title: "Framed Listening: Sentence Embedding Analyses (individual MIMC level)"
 author: "Hazel A. van der Walle (PhD student, Music, Durham University)"
-date: "23 April 2026"
+date: "11 May 2026"
 format:
   html:
     toc: true
@@ -26,8 +26,8 @@ condition categories are fully available.
 | `NLP-SEmb-analysis.qmd` **(this doc)** | **Sentence embeddings** | **Individual MIMC** | **N per participant** | **Yes** |
 
 At the individual level, each row is one participant's MIMC description for one
-clip × context cell. This means `Sclip_Scontext` pairs (same clip, same context,
-different participants) now exist and are fully populated, enabling RQ2b
+clip × context cell. This means `SC_SX` pairs (same clip, same context,
+different participants) now exist and are fully populated, enabling RQ3b
 (combined alignment advantage) to be tested for the first time in the pipeline.
 
 **Model selection note**: `all-MiniLM-L6-v2` is used as the default model. 
@@ -45,7 +45,6 @@ and research questions exactly.
 ## Setup
 
 ```{r setup-r}
-#| id: r setup
 #| echo: false
 
 library(reticulate)
@@ -57,8 +56,7 @@ library(reticulate)
  ), pip = TRUE)
 ```
 
-```{python setup-python, echo=FALSE}
-#| id: python setup
+```{python setup-python}
 #| echo: false
 
 import os
@@ -88,10 +86,9 @@ print(f"Output directory: {output_dir}")
 ```
 
 ```{python version-check}
-#| id: python setup checks
 #| echo: false
 
-# ── Environment version check ──────────────────────────────────────────────────
+# ── Environment version check ─────────────────────────────────────────────────
 import importlib, sys
 from packaging.version import Version
 
@@ -128,7 +125,6 @@ else:
 ```
 
 ```{python setup-python-MODEL}
-#| id: model setting
 #| echo: false
 
 # ── Model configuration ────────────────────────────────────────────────────────
@@ -164,7 +160,6 @@ print(f"Native ST model: {ST_NATIVE}")
 ## Helper Functions
 
 ```{python helpers}
-#| id: helper functions
 #| echo: false
 
 def sig_marker(p):
@@ -177,18 +172,27 @@ def sig_marker(p):
 
 def welch_t(g1, g2):
     """Welch's t-test with Welch-Satterthwaite degrees of freedom.
-    Returns (t, p, df)."""
+    Returns (t, p, df, mean_diff, ci_low, ci_high)."""
     n1, n2 = len(g1), len(g2)
     v1, v2 = g1.var(ddof=1), g2.var(ddof=1)
     se     = np.sqrt(v1/n1 + v2/n2)
     t      = (g1.mean() - g2.mean()) / se
     df     = (v1/n1 + v2/n2)**2 / ((v1/n1)**2/(n1-1) + (v2/n2)**2/(n2-1))
     p      = 2 * (1 - stats.t.cdf(abs(t), df))
-    return float(t), float(p), float(df)
+    # 95% CI on the mean difference
+    t_crit    = stats.t.ppf(0.975, df)
+    mean_diff = float(g1.mean() - g2.mean())
+    ci_low    = mean_diff - t_crit * float(se)
+    ci_high   = mean_diff + t_crit * float(se)
+    return float(t), float(p), float(df), mean_diff, ci_low, ci_high
 
 
 def cohens_d(g1, g2):
-    """Compute Cohen's d effect size."""
+    """Compute Cohen's d effect size.
+    NOTE: d benchmarks (small/medium/large) are not appropriate for pairwise
+    similarity data where N is a function of N² responses. Report 95% CIs
+    from welch_t() as the primary effect magnitude indicator; d is retained
+    for completeness and cross-study comparison only."""
     pooled = np.sqrt((g1.std()**2 + g2.std()**2) / 2)
     return float((g1.mean() - g2.mean()) / pooled) if pooled > 0 else np.nan
 ```
@@ -203,7 +207,6 @@ Load **`dataMIMC_preprocessed.csv`** — individual-level preprocessed MIMC
 descriptions, one row per participant × clip × context observation.
 
 ```{python load-data}
-#| id: get data
 #| echo: false
 
 data_path = f"{base_path}/NLP_outputs/dataMIMC_preprocessed.csv"
@@ -244,7 +247,6 @@ cached to disk keyed to the model slug so re-runs skip encoding entirely, and
 switching models automatically triggers a fresh encode.
 
 ```{python embed}
-#| id: embeddings
 #| echo: false
 
 embed_path = f"{output_dir}/embeddings_{MODEL_SLUG}.npy"
@@ -279,7 +281,7 @@ if N is large. Similarities are instead computed in batches and written directly
 the condition records, avoiding materialising the full matrix.
 
 Each pair is annotated with the same five condition labels as the combMIMC pipeline.
-Because participants contribute one response per cell, `Sclip_Scontext` pairs now
+Because participants contribute one response per cell, `SC_SX` pairs now
 exist: two different participants who heard the same clip under the same context
 label.
 
@@ -291,24 +293,27 @@ label.
 
 | Condition | Description |
 |---|---|
-| `Sclip_Scontext` | Same clip, same context — **different participants** — combined alignment |
-| `Sclip_Dcontext` | Same clip, different context — isolates **clip** influence |
-| `Dclip_Scontext` | Different clip, same context — isolates **context** influence |
-| `Dclip_Dcontext_Sgenre` | Both different, same genre |
-| `Dclip_Dcontext_Dgenre` | Entirely different — dissimilarity baseline |
+| `SC_SX` | Same clip, same context — **different participants** — combined alignment |
+| `SC_dx` | Same clip, different context — isolates **clip** influence |
+| `dc_SX_SG` | Different clip, same context, same genre |
+| `dc_dx_SG` | Different clip, different context, same genre |
+| `dc_SX_dg` | Different clip, same context, different genre — isolates **context** influence |
+| `dc_dx_dg` | Entirely different — dissimilarity floor (observed lower bound) |
 
-```{python extract-similarity, echo=FALSE}
-#| id: similarity extraction
+```{python extract-similarity}
+#| echo: false
 
 clips    = df["clip_name"].values
 contexts = df["context_word"].values
 genres   = df["clip_genre"].values
+pids     = df["PROLIFIC_PID"].values
 n        = len(df)
 
 records = {k: [] for k in [
     "item_i", "item_j", "similarity",
     "same_clip", "same_context", "same_genre", "condition",
-    "clip_i", "clip_j", "context_i", "context_j", "genre_i", "genre_j"
+    "clip_i", "clip_j", "context_i", "context_j", "genre_i", "genre_j",
+    "pid_i", "pid_j"
 ]}
 
 # Batch dot-product similarity (embeddings are L2-normalised so dot = cosine)
@@ -322,13 +327,17 @@ for i in range(n):
         sg = genres[i]   == genres[j]
 
         if sc and sx:
-            cond = "Sclip_Scontext"
+            cond = "SC_SX"
         elif sc and not sx:
-            cond = "Sclip_Dcontext"
-        elif not sc and sx:
-            cond = "Dclip_Scontext"
+            cond = "SC_dx"
+        elif not sc and sx and sg:
+            cond = "dc_SX_SG"
+        elif not sc and not sx and sg:
+            cond = "dc_dx_SG"
+        elif not sc and sx and not sg:
+            cond = "dc_SX_dg"
         else:
-            cond = "Dclip_Dcontext_Sgenre" if sg else "Dclip_Dcontext_Dgenre"
+            cond = "dc_dx_dg"
 
         records["item_i"].append(i)
         records["item_j"].append(j)
@@ -343,6 +352,8 @@ for i in range(n):
         records["genre_j"].append(genres[j])
         records["clip_i"].append(clips[i])
         records["clip_j"].append(clips[j])
+        records["pid_i"].append(pids[i])
+        records["pid_j"].append(pids[j])
 
 sim_df = pd.DataFrame(records)
 
@@ -358,6 +369,53 @@ cntx_list   = sorted(df["context_word"].unique())
 print("\nSaved similarity data")
 ```
 
+```{python permutation-baseline}
+#| echo: false
+
+# ── Permutation baseline: chance similarity via random shuffling ───────────────
+# The "dissimilarity floor" condition (dc_dx_dg) uses observed pairs
+# from the experiment. A truly random baseline establishes what similarity would
+# be expected by chance if item identity was shuffled entirely, with no relation
+# to stimuli conditions. This provides a theoretically grounded null against which
+# all condition means can be compared.
+#
+# Procedure: 1000 shuffles of the similarity column within the full sim_df.
+# Each shuffle randomly reassigns similarity scores to pair indices, destroying
+# any condition structure. The mean of each shuffle gives one null sample.
+# The resulting distribution gives the expected similarity under H0 (no structure).
+
+N_PERMS    = 1000
+rng        = np.random.default_rng(42)
+sims_all   = sim_df["similarity"].values.copy()
+perm_means = np.array([
+    rng.permutation(sims_all).mean() for _ in range(N_PERMS)
+])
+
+perm_mean   = perm_means.mean()
+perm_sd     = perm_means.std()
+perm_ci_low = np.percentile(perm_means, 2.5)
+perm_ci_hi  = np.percentile(perm_means, 97.5)
+
+print("PERMUTATION BASELINE (1000 shuffles)")
+print("=" * 55)
+print(f"  Mean similarity under H0:  {perm_mean:.4f}")
+print(f"  SD of permutation means:   {perm_sd:.6f}")
+print(f"  95% CI:                    [{perm_ci_low:.4f}, {perm_ci_hi:.4f}]")
+print(f"\n  Compare to observed condition means:")
+for cond in ["dc_dx_dg", "dc_SX_dg", "dc_dx_SG",
+             "dc_SX_SG", "SC_dx", "SC_SX"]:
+    m = sim_df.loc[sim_df["condition"] == cond, "similarity"].mean()
+    if not np.isnan(m):
+        diff = m - perm_mean
+        print(f"  {cond:<30}  M={m:.4f}  vs H0: {diff:+.4f}")
+
+# Save permutation results for use in R visualisations
+perm_results = dict(
+    perm_mean=float(perm_mean), perm_sd=float(perm_sd),
+    perm_ci_low=float(perm_ci_low), perm_ci_hi=float(perm_ci_hi)
+)
+```
+
 ---
 ---
 
@@ -370,7 +428,7 @@ genres of items in the pair); `item_i` and `item_j` are included as a random
 intercept to account for the fact that each individual response appears in 
 multiple pairs.
 
-Three models are fitted in sequence. Model 1 tests main effects of context, genre, and clip — clip is included as both a fixed and random effect to separate clip-specific idiosyncrasies from the genre signal, since genre is fully nested within clip. Model 2 adds mean believability (from the supplementary study) as a covariate at the clip × context cell level (64 unique values, one per clip–context pairing) — this gives genuine within-context variation in believability and avoids the collinearity that would arise from collapsing to context-level means. Model 3 tests the context × genre interaction while retaining clip as a covariate. Model comparisons use likelihood ratio tests (ANOVA on nested models) to determine whether each additional term improves fit.
+Three models are fitted in sequence. Model 1 tests main effects of context, genre, and clip — clip is included as both a fixed and random effect to separate clip-specific idiosyncrasies from the genre signal, since genre is fully nested within clip. Model 3 adds mean believability (from the supplementary study) as a covariate at the clip × context cell level (64 unique values, one per clip–context pairing) — this gives genuine within-context variation in believability and avoids the collinearity that would arise from collapsing to context-level means. Model 2 tests the context × genre interaction while retaining clip as a covariate. Model comparisons use likelihood ratio tests (ANOVA on nested models) to determine whether each additional term improves fit.
 
 Following the LMMs, estimated marginal means (emmeans) unpack pairwise context
 differences while controlling for genre. Finally, a Random Forest classifier and
@@ -380,15 +438,23 @@ can be recovered from similarity scores alone.
 ### LMM setup & prep
 
 ```{r lmm-setup}
-#| id: python to r
+#| echo: false
 
 # ── Packages ──────────────────────────────────────────────────────────────────
-required <- c("lme4", "lmerTest", "MuMIn", "emmeans",
-              "randomForest", "MASS", "dplyr", "ggplot2")
+required <- c("lme4", "lmerTest", "MuMIn", "emmeans", "ggdist",
+              "randomForest", "MASS", "dplyr", "ggplot2", "car")
 for (pkg in required) {
   if (!requireNamespace(pkg, quietly = TRUE))
     install.packages(pkg, repos = "https://cloud.r-project.org")
   library(pkg, character.only = TRUE)
+}
+
+# Normalise emmeans CI column names — at large N emmeans uses asymp.LCL/UCL
+# instead of lower.CL/upper.CL; this ensures ggplot code works consistently
+fix_emm_ci <- function(df) {
+  names(df)[names(df) == "asymp.LCL"] <- "lower.CL"
+  names(df)[names(df) == "asymp.UCL"] <- "upper.CL"
+  df
 }
 
 # ── Paths (inherit from Python session via reticulate base_path) ──────────────
@@ -411,7 +477,7 @@ cat("Columns:", paste(names(sim_df), collapse = ", "), "\n")
 ```
 
 ```{r lmm-prep}
-#| id: pair combination chunk
+#| echo: false
 
 # Using sum-to-zero (effects) coding so no reference level is used —
 # each coefficient represents deviation from the grand mean,
@@ -423,6 +489,7 @@ sim_df$genre_comb   <- paste0(sim_df$genre_i,  "_",sim_df$genre_j)
 sim_df$context_comb <- paste0(sim_df$context_i,"_",sim_df$context_j)
 sim_df$clip_comb    <- paste0(sim_df$clip_i,   "_",sim_df$clip_j)
 
+
 cat("genre_comb levels:\n");     print(table(sim_df$genre_comb))
 cat("\ncontext_comb levels:\n"); print(table(sim_df$context_comb))
 # clip_comb levels levels not pasted as it's quite long
@@ -431,9 +498,11 @@ cat("\ncontext_comb levels:\n"); print(table(sim_df$context_comb))
 sim_df$genre_comb   <- factor(sim_df$genre_comb)
 sim_df$context_comb <- factor(sim_df$context_comb)
 sim_df$clip_comb    <- factor(sim_df$clip_comb)
-sim_df$item_i       <- factor(sim_df$item_i)
-sim_df$item_j       <- factor(sim_df$item_j)
+sim_df$pid_i        <- factor(sim_df$pid_i)
+sim_df$pid_j        <- factor(sim_df$pid_j)
 
+cat("\nUnique participants (pid_i):", nlevels(sim_df$pid_i), "\n")
+cat("Unique participants (pid_j):", nlevels(sim_df$pid_j), "\n")
 cat("\ncontext_comb levels:", nlevels(sim_df$context_comb), "\n")
 cat("\ngenre_comb levels:  ", nlevels(sim_df$genre_comb),   "\n")
 cat("\nclip_comb levels:   ", nlevels(sim_df$clip_comb),    "\n")
@@ -490,36 +559,36 @@ cat("Rows with NA (unmatched):", sum(is.na(sim_df$believability_pair)), "\n")
 ### LMM Models
 
 ```{r lmm-model-checks}
-#| id: LMM model checks
 #| eval: false
 #| echo: false
 
 S <- summarise(group_by(sim_df,context_comb,genre_comb),
                M=mean(similarity,na.rm=TRUE),
                SD=sd(similarity,na.rm=TRUE))
-S
+  S
+
 SC <- summarise(group_by(sim_df,context_comb),
                 M=mean(similarity,na.rm=TRUE),
                 SD=sd(similarity,na.rm=TRUE))
-SC
+  SC
+
 SG <- summarise(group_by(sim_df,genre_comb),
                 M=mean(similarity,na.rm=TRUE),
                 SD=sd(similarity,na.rm=TRUE))
-SG
+  SG
 ```
 
 #### Model 1: context + genre main effects
 
 ```{r lmm-model1}
-#| id: LMM model 1, context + genre main effects
-#| eval: true #false skips this section
-#| echo: true
+#| eval: true
+#| echo: false
 
 cat("———MODEL 1: similarity ~ context_comb + genre_comb 
-               + (1 | item_i) + (1 | item_j), + (1 | clip_comb)———\n")
+                 + (1 | clip_comb) + (1 | pid_i) + (1 | pid_j),———\n")
 
 model1 <- lmer(similarity ~ context_comb + genre_comb 
-               + (1 | item_i) + (1 | item_j),
+               + (1 | clip_comb) + (1 | pid_i) + (1 | pid_j),
                data = sim_df, REML = FALSE)
 
 print(anova(model1))
@@ -527,223 +596,583 @@ cat("\n———Omnibus fixed effects — no reference level———\n")
 print(car::Anova(model1, type = 3))
 cat("\n———Pseudo-R² (Nakagawa & Schielzeth), variance explained:———\n")
 print(MuMIn::r.squaredGLMM(model1))
-cat("\n———EMMean, context combos with CI———\n")
-print(emmeans(model1, ~ context_comb))   # mean per context combination with CI
-plot(emmeans(model1, ~ context_comb))
-cat("\n———EMMean, genre combos with CI———\n")
-print(emmeans(model1, ~ genre_comb))     # mean per genre combination with CI
-plot(emmeans(model1, ~ genre_comb))
-cat("\n———random effects variance check———\n")
-print(summary(model1)$varcor)   # random effects variance only, no fixed effect coefficients
 
+cat("\n———EMMean, context combos with 95% CI———\n")
+emm1_ctx <- emmeans(model1, ~ context_comb)
+print(summary(emm1_ctx, infer = c(TRUE, FALSE), level = 0.95))
+
+cat("\n———EMMean, genre combos with 95% CI———\n")
+emm1_gen <- emmeans(model1, ~ genre_comb)
+print(summary(emm1_gen, infer = c(TRUE, FALSE), level = 0.95))
+
+cat("\n———random effects variance check———\n")
+print(summary(model1)$varcor)
+
+# ── ggdist visualisation: context emmeans with 95% CI ─────────────────────────
+emm1_ctx_df <- fix_emm_ci(as.data.frame(summary(
+  emm1_ctx, infer = c(TRUE, FALSE), level = 0.95)))
+
+emm1_ctx
+
+p_emm1_ctx <- ggplot(emm1_ctx_df,
+                      aes(x = reorder(context_comb, emmean), y = emmean)) +
+  geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL),
+                  size = 0.7, linewidth = 1, colour = "#2c7bb6") +
+  geom_hline(yintercept = mean(emm1_ctx_df$emmean),
+             linetype = "dashed", colour = "grey50", linewidth = 0.5) +
+  coord_flip() +
+  labs(title    = "Model 1: Estimated Marginal Means — Context Combination",
+       subtitle = "Points = emmean; bars = 95% CI; dashed = grand mean",
+       x = NULL, y = "Cosine similarity (emmean)") +
+    scale_y_continuous(limits=c(.15,.2))+
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+
+print(p_emm1_ctx)
+ggsave(file.path(output_dir, "emmeans_model1_context.png"),
+       p_emm1_ctx, width = 10, height = 7, dpi = 300)
+
+# ── ggdist visualisation: genre emmeans with 95% CI ───────────────────────────
+emm1_gen_df <- fix_emm_ci(as.data.frame(summary(
+  emm1_gen, infer = c(TRUE, FALSE), level = 0.95)))
+
+p_emm1_gen <- ggplot(emm1_gen_df,
+                      aes(x = reorder(genre_comb, emmean), y = emmean)) +
+  geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL),
+                  size = 0.7, linewidth = 1, colour = "#d7191c") +
+  geom_hline(yintercept = mean(emm1_gen_df$emmean),
+             linetype = "dashed", colour = "grey50", linewidth = 0.5) +
+  coord_flip() +
+  labs(title    = "Model 1: Estimated Marginal Means — Genre Combination",
+       subtitle = "Points = emmean; bars = 95% CI; dashed = grand mean",
+       x = NULL, y = "Cosine similarity (emmean)") +
+    scale_y_continuous(limits=c(.15,.2))+
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+
+print(p_emm1_gen)
+ggsave(file.path(output_dir, "emmeans_model1_genre.png"),
+       p_emm1_gen, width = 10, height = 7, dpi = 300)
+
+## ── COWPLOT ──────────────────────────────────────────────────────────────────
+p_combined <- cowplot::plot_grid(p_emm1_ctx, p_emm1_gen, ncol = 1)
+print(p_combined)
+ggsave(file.path(output_dir, "emmeans_model1_ctx_genre_stacked.png"),
+       p_combined, width = 10, height = 14, dpi = 300)
+
+# ── Pairwise contrasts with 95% CI (Tukey) ────────────────────────────────────
+cat("\n———Pairwise context contrasts (Tukey), with 95% CI———\n")
+emm1_ctx_pairs <- pairs(emm1_ctx, adjust = "tukey")
+print(summary(emm1_ctx_pairs, infer = c(TRUE, TRUE), level = 0.95))
+
+# Forest-style plot of pairwise contrasts
+emm1_pairs_df <- fix_emm_ci(as.data.frame(
+  summary(emm1_ctx_pairs, infer = c(TRUE, TRUE), level = 0.95)))
+
+p_contrasts1 <- ggplot(emm1_pairs_df,
+                        aes(x = reorder(contrast, estimate), y = estimate)) +
+  geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL),
+                  size = 0.6, linewidth = 0.9,
+                  colour = ifelse(emm1_pairs_df$p.value < 0.05,
+                                  "#2c7bb6", "grey60")) +
+  geom_hline(yintercept = 0, linetype = "dashed",
+             colour = "grey30", linewidth = 0.5) +
+  coord_flip() +
+  labs(title    = "Model 1: Pairwise Context Contrasts",
+       subtitle = "Blue = significant (p < .05, Tukey); bars = 95% CI; dashed = no difference",
+       x = NULL, y = "Estimated difference in cosine similarity") +
+  theme_minimal(base_size = 10) +
+  theme(plot.title = element_text(face = "bold"))
+
+print(p_contrasts1)
+ggsave(file.path(output_dir, "emmeans_model1_contrasts.png"),
+       p_contrasts1, width = 12, height = 40, dpi = 300, limitsize = FALSE)
+
+### ── Option A: filtered forest plot — same-context vs same-context contrasts only
+# Keep only contrasts where both conditions are same-context (xxx_xxx - yyy_yyy)
+emm1_pairs_df <- fix_emm_ci(as.data.frame(
+  summary(emm1_ctx_pairs, infer = c(TRUE, TRUE), level = 0.95)))
+
+# Flag same-context pairs: both sides of contrast match pattern "word_word"
+is_same_ctx <- function(label) {
+  parts <- strsplit(label, " - ")[[1]]
+  all(sapply(parts, function(p) {
+    tokens <- strsplit(p, "_")[[1]]
+    length(tokens) == 2 && tokens[1] == tokens[2]
+  }))
+}
+emm1_pairs_key <- emm1_pairs_df[
+  sapply(as.character(emm1_pairs_df$contrast), is_same_ctx), ]
+
+# Clean contrast labels: "bar_bar - concert_concert" → "Bar vs Concert"
+clean_label <- function(label) {
+  parts  <- strsplit(label, " - ")[[1]]
+  ctxs   <- sapply(parts, function(p) strsplit(p, "_")[[1]][1])
+  paste0(tools::toTitleCase(ctxs[1]), " vs ", tools::toTitleCase(ctxs[2]))
+}
+emm1_pairs_key$label <- sapply(as.character(emm1_pairs_key$contrast), clean_label)
+
+p_contrasts_key <- ggplot(emm1_pairs_key,
+                            aes(x = reorder(label, estimate), y = estimate)) +
+  geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL),
+                  size = 0.8, linewidth = 1.1,
+                  colour = ifelse(emm1_pairs_key$p.value < 0.05,
+                                  "#2c7bb6", "grey60")) +
+  geom_hline(yintercept = 0, linetype = "dashed",
+             colour = "grey30", linewidth = 0.6) +
+  coord_flip() +
+  labs(title    = "Model 1: Same-Context Condition Contrasts",
+       subtitle = "Pairwise differences between same-context emmeans\nBlue = significant (Tukey); bars = 95% CI",
+       x = NULL, y = "Estimated difference in cosine similarity") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title   = element_text(face = "bold"),
+        axis.text.y  = element_text(size = 11))
+
+print(p_contrasts_key)
+ggsave(file.path(output_dir, "emmeans_model1_contrasts_key.png"),
+       p_contrasts_key, width = 8, height = 5, dpi = 300)
+
+### ── Option B: full pairwise heatmap — all 120 contrasts as a matrix
+# Parse contrast labels into two columns
+parse_contrast <- function(df) {
+  parts  <- strsplit(as.character(df$contrast), " - ")
+  df$cond_a <- sapply(parts, `[`, 1)
+  df$cond_b <- sapply(parts, `[`, 2)
+  df
+}
+emm1_hm <- parse_contrast(emm1_pairs_df)
+
+# Make symmetric matrix (add mirrored rows)
+emm1_hm_sym <- rbind(
+  emm1_hm[, c("cond_a","cond_b","estimate","p.value")],
+  data.frame(cond_a   = emm1_hm$cond_b,
+             cond_b   = emm1_hm$cond_a,
+             estimate = -emm1_hm$estimate,
+             p.value  =  emm1_hm$p.value)
+)
+emm1_hm_sym$sig <- emm1_hm_sym$p.value < 0.05
+
+# Order levels: same-context pairs first, then mixed
+ctx_order <- c("bar_bar","concert_concert","movie_movie","videogame_videogame",
+               sort(setdiff(unique(emm1_hm_sym$cond_a),
+                            c("bar_bar","concert_concert",
+                              "movie_movie","videogame_videogame"))))
+emm1_hm_sym$cond_a <- factor(emm1_hm_sym$cond_a, levels = ctx_order)
+emm1_hm_sym$cond_b <- factor(emm1_hm_sym$cond_b, levels = ctx_order)
+
+# Clean axis labels: bar_bar → Bar–Bar
+clean_comb <- function(x) {
+  parts <- strsplit(as.character(x), "_")[[1]]
+  paste0(tools::toTitleCase(parts[1]), "–", tools::toTitleCase(parts[2]))
+}
+axis_labels <- setNames(
+  sapply(ctx_order, clean_comb), ctx_order)
+
+p_heatmap <- ggplot(emm1_hm_sym,
+                     aes(x = cond_b, y = cond_a, fill = estimate)) +
+  geom_tile(colour = "white", linewidth = 0.3) +
+  geom_point(data = subset(emm1_hm_sym, sig),
+             aes(x = cond_b, y = cond_a),
+             colour = "black", size = 0.6, inherit.aes = FALSE) +
+  scale_fill_gradient2(low      = "#d73027",
+                       mid      = "white",
+                       high     = "#4575b4",
+                       midpoint = 0,
+                       name     = "Estimated\ndifference") +
+  scale_x_discrete(labels = axis_labels) +
+  scale_y_discrete(labels = axis_labels) +
+  labs(title    = "Model 1: All Pairwise Context Contrasts",
+       subtitle = "Fill = estimated difference in cosine similarity\nBlack dot = significant (p < .05, Tukey-adjusted)",
+       x = NULL, y = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(plot.title   = element_text(face = "bold", size = 11),
+        axis.text.x  = element_text(angle = 45, hjust = 1, size = 7),
+        axis.text.y  = element_text(size = 7),
+        legend.position = "right",
+        panel.grid   = element_blank())
+
+print(p_heatmap)
+ggsave(file.path(output_dir, "emmeans_model1_contrasts_heatmap.png"),
+       p_heatmap, width = 11, height = 10, dpi = 300)
 ```
 
-#### Model 2: + believability covariate
+#### Model 2: context × genre interaction
 
 ```{r lmm-model2}
-#| id: LMM model 2, context + genre main effects + believability covariate
 #| eval: true
-#| echo: true
+#| echo: false
 
-cat("\n———MODEL 2: + believability_pair———\n")
-
-model2 <- lmer(similarity ~ context_comb + genre_comb + believability_pair 
-               + (1 | item_i) + (1 | item_j),
-               data = sim_df, REML = FALSE)
-
-print(anova(model2))
-cat("\n———Omnibus fixed effects — no reference level———\n")
-print(car::Anova(model2, type = 3))
-cat("\n———Pseudo-R² (Nakagawa & Schielzeth), variance explained:———\n")
-print(MuMIn::r.squaredGLMM(model2))
-cat("\n———EMMean, context combos with CI———\n")
-print(emmeans(model2, ~ context_comb))
-cat("\n———EMMean, genre combos with CI———\n")
-print(emmeans(model2, ~ genre_comb))
-cat("\n———random effects variance check———\n")
-print(summary(model2)$varcor)
-
-cat("\n———Model comparison — Model 1 vs Model 2 (believability_pair):———\n")
-print(anova(model1, model2))
-
-```
-
-#### Model 3: context × genre interaction
-
-```{r lmm-model3}
-#| id: LMM model 3, context x genre interaction
-#| eval: true
-#| echo: true
-
-cat("\n———MODEL 3A: context_comb × genre_comb interaction (downsized sample)———\n")
+cat("\n———Model 2A: context_comb × genre_comb interaction (downsized sample)———\n")
 # *NOTE: with 1.9M rows, context_comb * genre_comb generates 16×16 = 256
 #        interaction terms — too much for memory with three random effects.
 set.seed(41100)
 sim_sub <- sim_df[sample(nrow(sim_df), 200000), ]
 
-model3A <- lmer(similarity ~ context_comb * genre_comb 
-               + (1 | item_i) + (1 | item_j),
-               data = sim_sub, REML = FALSE)
+model2A <- lmer(similarity ~ context_comb * genre_comb 
+                + (1 | pid_i) + (1 | pid_j),
+                data = sim_sub, REML = FALSE)
 
-print(anova(model3A))
+print(anova(model2A))
 cat("\n———Omnibus fixed effects — no reference level———\n")
-print(car::Anova(model3A, type = 3))
+print(car::Anova(model2A, type = 3))
 cat("\n———Pseudo-R²:———\n")
-print(MuMIn::r.squaredGLMM(model3A))
-cat("\n———EMMean, context combos with CI———\n")
-print(emmeans(model3A, ~ context_comb))
-cat("\n———EMMean, genre combos with CI———\n")
-print(emmeans(model3A, ~ genre_comb))
+print(MuMIn::r.squaredGLMM(model2A))
+cat("\n———EMMean, context combos with 95% CI———\n")
+emm2A_ctx <- emmeans(model2A, ~ context_comb)
+print(summary(emm2A_ctx, infer = c(TRUE, FALSE), level = 0.95))
+cat("\n———EMMean, genre combos with 95% CI———\n")
+emm2A_gen <- emmeans(model2A, ~ genre_comb)
+print(summary(emm2A_gen, infer = c(TRUE, FALSE), level = 0.95))
+cat("\n———EMMean, context × genre cell means with 95% CI———\n")
+emm2A_int <- emmeans(model2A, ~ context_comb | genre_comb)
+print(summary(emm2A_int, infer = c(TRUE, FALSE), level = 0.95))
 cat("\n———random effects variance check———\n")
-print(summary(model3A)$varcor)
+print(summary(model2A)$varcor)
 
-cat("\n———MODEL 3B: context_i × genre_i interaction (simplified, full data)———\n")
-# Uses single-item _i variables (4 levels each) rather than _comb (16 levels).
-# Tests whether context effect on similarity interacts with music genre —
-# more directly interpretable for RQ3 and fits in memory on the full dataset.
-sim_df$context_i <- factor(sim_df$context_i)
-sim_df$genre_i   <- factor(sim_df$genre_i)
+# ── ggdist interaction plot: context × genre emmeans 
+emm2A_int_df <- fix_emm_ci(as.data.frame(
+  summary(emm2A_int, infer = c(TRUE, FALSE), level = 0.95)))
 
-model3B <- lmer(similarity ~ context_i * genre_i 
-               + (1 | item_i) + (1 | item_j),
-               data = sim_df, REML = FALSE)
+# Extract genre_i for faceting (genre_comb = "GenreA_GenreB")
+emm2A_int_df$genre_i    <- sub("_.*", "", emm2A_int_df$genre_comb)
+emm2A_int_df$pair_type  <- ifelse(
+  sub("_.*", "", emm2A_int_df$genre_comb) ==
+  sub(".*_", "", emm2A_int_df$genre_comb),
+  "Same genre", "Cross genre")
 
-print(anova(model3B))
-cat("\n———Omnibus fixed effects — no reference level———\n")
-print(car::Anova(model3B, type = 3))
-cat("\n———Pseudo-R²:———\n")
-print(MuMIn::r.squaredGLMM(model3B))
-cat("\n———EMMean, context_i with CI———\n")
-print(emmeans(model3B, ~ context_i))
-cat("\n———EMMean, genre_i with CI———\n")
-print(emmeans(model3B, ~ genre_i))
-cat("\n———EMMean, context_i × genre_i cell means———\n")
-print(emmeans(model3B, ~ context_i | genre_i))
-cat("\n———random effects variance check———\n")
-print(summary(model3B)$varcor)
+# Extract genre_j for colouring
+emm2A_int_df$genre_j <- sub(".*_", "", emm2A_int_df$genre_comb)
 
+# Genre colour palette — consistent throughout
+genre_colours <- c(
+  "80s"        = "#fc8b22",
+  "Electronic" = "#86d202",
+  "Jazz"       = "#9a89ea",
+  "Metal"      = "#9e185b"
+)
+
+# ── Plot 1: faceted by genre_i, coloured by genre_j ──────────────────────────
+p_emm2A_faceted <- ggplot(emm2A_int_df,
+                            aes(x = context_comb, y = emmean,
+                                colour = genre_j, group = genre_comb,
+                                alpha  = pair_type,
+                                linewidth = pair_type)) +
+  geom_line() +
+  geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL),
+                  size = 0.45, linewidth = 0.5,
+                  position = position_dodge(width = 0.25)) +
+  scale_colour_manual(values = genre_colours, name = "Genre (item j)") +
+  scale_alpha_manual(values = c("Same genre" = 1, "Cross genre" = 0.35),
+                     guide = "none") +
+  scale_linewidth_manual(values = c("Same genre" = 1.2, "Cross genre" = 0.5),
+                         guide = "none") +
+  facet_wrap(~ genre_i, ncol = 2,
+             labeller = labeller(genre_i = c(
+               "80s"        = "Genre i: 80s",
+               "Electronic" = "Genre i: Electronic",
+               "Jazz"       = "Genre i: Jazz",
+               "Metal"      = "Genre i: Metal"))) +
+  labs(title    = "Model 2A: Context × Genre Estimated Marginal Means",
+       subtitle = paste0("Faceted by genre of item i; coloured by genre of item j\n",
+                         "Thick opaque lines = same-genre pairs; thin faded = cross-genre"),
+       x = "Context combination", y = "Cosine similarity (emmean)") +
+  theme_minimal(base_size = 10) +
+  theme(plot.title      = element_text(face = "bold"),
+        axis.text.x     = element_text(angle = 35, hjust = 1, size = 8),
+        strip.text      = element_text(face = "bold", size = 10),
+        legend.position = "right",
+        panel.spacing   = unit(1.2, "lines"))
+
+print(p_emm2A_faceted)
+ggsave(file.path(output_dir, "emmeans_model2A_faceted_genre_j.png"),
+       p_emm2A_faceted, width = 14, height = 10, dpi = 300)
+
+# ── Plot 2: Heatmap, full context_comb × genre_comb emmeans (256 cells) ───────
+# Parse context_comb into context_i and context_j
+emm2A_int_df$context_i <- sub("_.*", "", emm2A_int_df$context_comb)
+emm2A_int_df$context_j <- sub(".*_", "", emm2A_int_df$context_comb)
+
+# Order factors
+ctx_order   <- c("bar", "concert", "movie", "videogame")
+genre_order <- c("80s", "Electronic", "Jazz", "Metal")
+
+emm2A_int_df$context_i <- factor(emm2A_int_df$context_i, levels = ctx_order)
+emm2A_int_df$context_j <- factor(emm2A_int_df$context_j, levels = ctx_order)
+emm2A_int_df$genre_i   <- factor(emm2A_int_df$genre_i,   levels = genre_order)
+emm2A_int_df$genre_j   <- factor(emm2A_int_df$genre_j,   levels = genre_order)
+
+# Build compound axis labels: "Bar × 80s", "Bar × Electronic" etc.
+# x-axis = context_j × genre_j  |  y-axis = context_i × genre_i
+emm2A_int_df$x_label <- paste0(tools::toTitleCase(as.character(emm2A_int_df$context_j)),
+                                 "\n", emm2A_int_df$genre_j)
+emm2A_int_df$y_label <- paste0(tools::toTitleCase(as.character(emm2A_int_df$context_i)),
+                                 " × ", emm2A_int_df$genre_i)
+
+# Order y-axis: group by genre_i then context_i
+emm2A_int_df$y_label <- factor(emm2A_int_df$y_label,
+  levels = rev(as.vector(outer(
+    ctx_order,
+    genre_order,
+    function(c, g) paste0(tools::toTitleCase(c), " × ", g)
+  ))))
+
+# Order x-axis: context_j varies fastest within genre_j blocks
+emm2A_int_df$x_label <- factor(emm2A_int_df$x_label,
+  levels = as.vector(outer(
+    ctx_order,
+    genre_order,
+    function(c, g) paste0(tools::toTitleCase(c), "\n", g)
+  )))
+
+p_hm_full <- ggplot(emm2A_int_df,
+                     aes(x = x_label, y = y_label, fill = emmean)) +
+  geom_tile(colour = "white", linewidth = 0.4) +
+  # Genre block dividers on x-axis (vertical lines every 4 columns)
+  geom_vline(xintercept = seq(4.5, 12.5, by = 4),
+             colour = "grey20", linewidth = 0.8) +
+  # Genre block dividers on y-axis (horizontal lines every 4 rows)
+  geom_hline(yintercept = seq(4.5, 12.5, by = 4),
+             colour = "grey20", linewidth = 0.8) +
+  scale_fill_gradient2(low      = "#9e185b",
+                       mid      = "#f5f0f5",
+                       high     = "#2c7bb6",
+                       midpoint = mean(emm2A_int_df$emmean),
+                       name     = "Emmean\nsimilarity") +
+  labs(title    = "Model 2A: Context × Genre Interaction — Full Emmeans Grid",
+       subtitle = "Each cell = predicted cosine similarity for one context_comb × genre_comb combination\nThick lines separate genre blocks",
+       x = "Context (item j) × Genre (item j)",
+       y = "Context (item i) × Genre (item i)") +
+  theme_minimal(base_size = 9) +
+  theme(plot.title      = element_text(face = "bold", size = 11),
+        axis.text.x     = element_text(angle = 45, hjust = 1, size = 7),
+        axis.text.y     = element_text(size = 7),
+        panel.grid      = element_blank(),
+        legend.position = "right")
+
+print(p_hm_full)
+ggsave(file.path(output_dir, "emmeans_model2A_heatmap_full.png"),
+       p_hm_full, width = 14, height = 12, dpi = 300)
 ```
 
 ```{r model-comparisons}
-#| id: LMM model comparisons
 #| eval: true
-#| echo: true
+#| echo: false
 
-cat("\n———Model 1 vs Model 2 (believability_pair):———\n")
-print(anova(model1, model2))
-
-cat("\n———Model 1A vs Model 3A (downsized, context_comb × genre_comb interaction):———\n")
-# Refit Model 1 on same downsized sample for a valid comparison with Model 3A
+cat("\n———Model 1A vs Model 2A (downsized, context_comb × genre_comb interaction):———\n")
+# Refit Model 1 on same downsized sample for a valid comparison with Model 2A
 set.seed(41100)
 sim_sub  <- sim_df[sample(nrow(sim_df), 200000), ]
 model1A  <- lmer(similarity ~ context_comb + genre_comb
-                 + (1 | item_i) + (1 | item_j),
+                 + (1 | pid_i) + (1 | pid_j),
                  data = sim_sub, REML = FALSE)
-print(anova(model1A, model3A))
+print(anova(model1A, model2A))
 
-# *NB: model3B cannot be directly compared to model1 via anova() because
-#      fixed effects are differently specified (_i vs _comb variables)
+# *NB: model2A cannot be directly compared to model1 via anova() because
+#      the random effects structures differ (model1 includes clip_comb).
+```
+
+### Supplementary Study — Does Believability Moderate the Context Effect?
+
+LMM Model 3 adds pair-level believability as a covariate over the context and
+genre main effects. This tests whether more believable clip–context pairings
+produce more semantically similar MIMC, independent of the context and genre
+structure already captured by Model 1.
+
+```{r lmm-model3}
+#| eval: true
+#| echo: false
+
+cat("\n———Model 3: similarity ~ context_comb + genre_comb + believability_pair———\n")
+cat("  + (1 | clip_comb) + (1 | pid_i) + (1 | pid_j)\n")
+
+model3 <- lmer(similarity ~ context_comb + genre_comb + believability_pair 
+               + (1 | clip_comb) + (1 | pid_i) + (1 | pid_j),
+               data = sim_df, REML = FALSE)
+
+print(anova(model3))
+cat("\n———Omnibus fixed effects — no reference level———\n")
+print(car::Anova(model3, type = 3))
+cat("\n———Pseudo-R² (Nakagawa & Schielzeth), variance explained:———\n")
+print(MuMIn::r.squaredGLMM(model3))
+cat("\n———EMMean, context combos with 95% CI———\n")
+print(summary(emmeans(model3, ~ context_comb), infer = c(TRUE, FALSE), level = 0.95))
+cat("\n———EMMean, genre combos with 95% CI———\n")
+print(summary(emmeans(model3, ~ genre_comb), infer = c(TRUE, FALSE), level = 0.95))
+cat("\n———random effects variance check———\n")
+print(summary(model3)$varcor)
+
+cat("\n———Model comparison — Model 1 vs Model 3 (believability_pair):———\n")
+print(anova(model1, model3))
 ```
 
 ### Estimated Marginal Means
 
 ```{r emmeans}
-#| id: Estimated marginal means, pairwise context comparisons
 #| eval: true
-#| echo: true
+#| echo: false
 
-cat("———ESTIMATED MARGINAL MEANS — Model 3A (downsized)———\n")
-cat("(pairwise context contrasts, Tukey adjustment)\n\n")
-print(emmeans(model3A, pairwise ~ context_comb, adjust = "tukey"))
+# Install ggdist if needed
+if (!requireNamespace("ggdist",   quietly = TRUE))
+  install.packages("ggdist",   repos = "https://cloud.r-project.org")
+if (!requireNamespace("patchwork", quietly = TRUE))
+  install.packages("patchwork", repos = "https://cloud.r-project.org")
+library(ggdist)
+library(patchwork)
 
-cat("\n———context × genre cell means (Model 3A):———\n")
-print(emmeans(model3A, ~ context_comb | genre_comb))
+# Pull permutation null from Python for reference line in plots
+perm_null <- py$perm_results$perm_mean
+perm_lo   <- py$perm_results$perm_ci_low
+perm_hi   <- py$perm_results$perm_ci_hi
 
-cat("\n———ESTIMATED MARGINAL MEANS — Model 3B (simplified, full data)———\n")
-cat("(pairwise context contrasts, Tukey adjustment)\n\n")
-print(emmeans(model3B, pairwise ~ context_i, adjust = "tukey"))
+# ── Model 2A emmeans (full data, context_comb × genre) ─────────────────────────
+# summary(e, infer=TRUE) gives predicted means + SE + 95% CI + t/z tests
+# This is safer than raw observed CIs because it accounts for random structure
 
-cat("\n———context_i × genre_i cell means (Model 3B):———\n")
-print(emmeans(model3B, ~ context_i | genre_i))
+cat("═══ EMMEANS: Model 2A — context_comb (marginal, downsized) ═══\n")
+e_context <- emmeans(model2A, ~ context_comb)
+cat("\nPredicted means + 95% CI (accounting for random structure):\n")
+print(summary(e_context, infer = TRUE))
 
+cat("\n═══ PAIRWISE CONTRASTS: context_comb (Tukey) ═══\n")
+e_context_pairs <- emmeans(model2A, pairwise ~ context_comb, adjust = "tukey")
+print(e_context_pairs$contrasts)
+
+cat("\n═══ EMMEANS: Model 2A — genre_comb ═══\n")
+e_genre <- emmeans(model2A, ~ genre_comb)
+print(summary(e_genre, infer = TRUE))
+
+cat("\n═══ PAIRWISE CONTRASTS: genre_comb (Tukey) ═══\n")
+print(emmeans(model2A, pairwise ~ genre_comb, adjust = "tukey")$contrasts)
+
+cat("\n═══ EMMEANS: context_comb × genre_comb cell means ═══\n")
+e_cell <- emmeans(model2A, ~ context_comb | genre_comb)
+print(summary(e_cell, infer = TRUE))
+
+cat("\n═══ PAIRWISE CONTRASTS: context_comb within each genre_comb ═══\n")
+print(emmeans(model2A, pairwise ~ context_comb | genre_comb, adjust = "tukey")$contrasts)
+
+# ── Figure 1: emmeans mean + 95% CI, all conditions, with permutation null ────
+# Uses ggdist::geom_pointinterval for clean CI display that correctly reflects
+# the random structure via the model-based SE rather than raw observed SE
+
+e_context_df       <- fix_emm_ci(as.data.frame(summary(e_context, infer = TRUE)))
+e_context_df$label <- as.character(e_context_df$context_comb)
+
+# Condition colour palette — consistent with Python plots
+cond_colours <- c(
+  "bar"       = "#9e1100",
+  "concert"   = "#d7ec78",
+  "movie"     = "#5f1c9e",
+  "videogame" = "#7dc3ff"
+)
+
+p_context <- ggplot(e_context_df,
+                     aes(x = reorder(label, emmean), y = emmean,
+                         colour = label)) +
+  geom_hline(yintercept = perm_null, linetype = "dashed",
+             colour = "grey40", linewidth = 0.8) +
+  annotate("rect", xmin = -Inf, xmax = Inf,
+           ymin = perm_lo, ymax = perm_hi,
+           fill = "grey70", alpha = 0.2) +
+  annotate("text", x = 0.6, y = perm_null + 0.0005,
+           label = sprintf("Permutation null (M=%.3f)", perm_null),
+           hjust = 0, size = 3, colour = "grey40") +
+  geom_pointinterval(aes(ymin = lower.CL, ymax = upper.CL),
+                      size = 4, linewidth = 1.2) +
+  scale_colour_manual(values = cond_colours, guide = "none") +
+  scale_x_discrete(labels = c(
+    "bar"       = "Bar",
+    "concert"   = "Concert",
+    "movie"     = "Movie",
+    "videogame" = "Video\ngame")) +
+  labs(title    = "Emmeans: context condition",
+       subtitle = "Predicted mean cosine similarity ± 95% CI (model-based)\nDashed = permutation null; shaded = null 95% CI",
+       x = NULL, y = "Predicted mean cosine similarity") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+
+# ── Figure 2: emmeans context × genre interaction ─────────────────────────────
+e_cell_df        <- fix_emm_ci(as.data.frame(summary(e_cell, infer = TRUE)))
+e_cell_df$genre  <- as.character(e_cell_df$genre_comb)
+e_cell_df$cntx   <- as.character(e_cell_df$context_comb)
+
+genre_colours <- c(
+  "80s"        = "#fc8a1e",
+  "Electronic" = "#7dcea0",
+  "Jazz"       = "#8552b6",
+  "Metal"      = "#9e1100"
+)
+
+p_interaction <- ggplot(e_cell_df,
+                         aes(x = cntx, y = emmean,
+                             colour = genre, group = genre)) +
+  geom_hline(yintercept = perm_null, linetype = "dashed",
+             colour = "grey40", linewidth = 0.7) +
+  geom_line(linewidth = 0.9, alpha = 0.8) +
+  geom_pointinterval(aes(ymin = lower.CL, ymax = upper.CL),
+                      position = position_dodge(width = 0.2),
+                      size = 3, linewidth = 0.8) +
+  scale_colour_manual(values = genre_colours, name = "Genre") +
+  scale_x_discrete(labels = c(
+    "bar"       = "Bar",
+    "concert"   = "Concert",
+    "movie"     = "Movie",
+    "videogame" = "Video\ngame")) +
+  labs(title    = "Emmeans: context × genre interaction",
+       subtitle = "Predicted mean ± 95% CI; lines connect genre profiles across contexts",
+       x = "Context condition", y = "Predicted mean cosine similarity") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+
+# ── Combine and save ──────────────────────────────────────────────────────────
+p_combined <- p_context + p_interaction +
+  plot_annotation(
+    title   = "Model-Based Emmeans: Similarity by Context and Genre",
+    subtitle = sprintf("Model 2A (context_comb × genre_comb — %s",
+                       py$MODEL_SLUG),
+    theme   = theme(plot.title    = element_text(face = "bold", size = 14),
+                    plot.subtitle = element_text(size = 10))
+  )
+
+ggsave(file.path(output_dir,
+                 paste0("emmeans_context_genre_", py$MODEL_SLUG, ".png")),
+       p_combined, width = 14, height = 6, dpi = 300)
+print(p_combined)
+cat("\nSaved emmeans figure\n")
+
+# ── Model 2A emmeans (downsized, context_comb) for reference ──────────────────
+cat("\n═══ EMMEANS: Model 2A — context_comb (downsized sample) ═══\n")
+e_comb     <- emmeans(model2A, ~ context_comb)
+e_comb_df  <- fix_emm_ci(as.data.frame(summary(e_comb, infer = TRUE)))
+print(e_comb_df)
+
+cat("\n═══ PAIRWISE CONTRASTS: context_comb ═══\n")
+print(emmeans(model2A, pairwise ~ context_comb, adjust = "tukey")$contrasts)
 ```
 
-### Random Forest
-
-*Question:* _how well can context condition be recovered from similarity scores alone?_
-
-```{r random-forest}
-#| id: Random Forest, classify context from similarity
-
-sim_rf <- sim_df[sim_df$condition == "Dclip_Scontext", ]
-sim_rf$context_comb <- factor(sim_rf$context_comb)
-
-# Downsample to avoid memory limits — stratified sample, equal per context class.
-# 50k pairs total (12.5k per class) is ample for a single-predictor classifier.
-MAX_PER_CLASS <- 12500
-set.seed(41100)
-
-# Compute the actual cap outside the pipe (min across all class sizes vs MAX_PER_CLASS)
-class_cap <- min(MAX_PER_CLASS, min(table(sim_rf$context_comb)))
-sim_rf <- sim_rf |>
-  group_by(context_comb) |>
-  slice_sample(n = class_cap) |>
-  ungroup() |>
-  as.data.frame()
-
-cat(sprintf("Downsampled to %d pairs for Random Forest (%d per class max)\n",
-            nrow(sim_rf), MAX_PER_CLASS))
-print(table(sim_rf$context_comb))
-
-rf_model <- randomForest(context_comb ~ similarity,
-                          data      = sim_rf,
-                          ntree     = 500,
-                          importance = TRUE)
-
-cat("\nRANDOM FOREST: context_comb ~ similarity\n")
-print(rf_model)
-cat("\nOOB classification rate:",
-    round(1 - rf_model$err.rate[500, "OOB"], 3), "\n")
-cat("Variable importance:\n")
-print(importance(rf_model))
-```
-
-### Linear Discriminant Analysis
-
-```{r lda}
-# ── Linear Discriminant Analysis: context from similarity ─────────────────────
-# Uses the same downsampled frame as the Random Forest above for consistency.
-lda_model <- MASS::lda(context_comb ~ similarity, data = sim_rf)
-lda_pred  <- predict(lda_model, sim_rf)
-lda_acc   <- mean(lda_pred$class == sim_rf$context_comb)
-
-cat("LDA: context_comb ~ similarity\n")
-print(lda_model)
-cat(sprintf("\nLDA classification accuracy: %.3f\n", lda_acc))
-
-cat("\nConfusion matrix:\n")
-print(table(Predicted = lda_pred$class, Actual = sim_rf$context_comb))
-```
 
 ---
 ---
 
 ## RQ1 — Does Context Shape MIMC Similarity?
 
-**Logic**: Compare `Dclip_Scontext` (different music, same context label) against
-`Dclip_Dcontext_Dgenre` (everything different — the dissimilarity floor). If context
+**Logic**: Compare `dc_SX_dg` (different music, same context label) against
+`dc_dx_dg` (everything different — the dissimilarity floor). If context
 drives convergence, pairs sharing a context label should be more similar than pairs
 sharing nothing.
 
 ### Omnibus Test
 
-```{python omnibus-kruskal, echo=FALSE}
+```{python omnibus-kruskal}
+#| echo: false
+
 all_conditions = [
-    "Sclip_Scontext",
-    "Sclip_Dcontext",
-    "Dclip_Scontext",
-    "Dclip_Dcontext_Sgenre",
-    "Dclip_Dcontext_Dgenre",
+    "SC_SX",
+    "SC_dx",
+    "dc_SX_SG",
+    "dc_SX_dg",
+    "dc_dx_SG",
+    "dc_dx_dg",
 ]
 
 cond_groups = [sim_df.loc[sim_df["condition"] == c, "similarity"].values
@@ -782,75 +1211,91 @@ posthoc_df.to_csv(
 print(f"\nSaved omnibus post-hoc table")
 ```
 
-### Context Effect: Dclip_Scontext vs Dclip_Dcontext_Dgenre
+### Context Effect: dc_SX_dg vs dc_dx_dg
 
-```{python rq1-context-effect, echo=FALSE}
-cntx_sims      = sim_df.loc[sim_df["condition"] == "Dclip_Scontext",       "similarity"]
-baseline_sims = sim_df.loc[sim_df["condition"] == "Dclip_Dcontext_Dgenre", "similarity"]
+```{python rq1-context-effect}
+#| echo: false
 
-t, p, df_val = welch_t(cntx_sims, baseline_sims)
-d            = cohens_d(cntx_sims, baseline_sims)
+cntx_sims   = sim_df.loc[sim_df["condition"] == "dc_SX_dg", "similarity"]
+joint_sims  = sim_df.loc[sim_df["condition"] == "dc_SX_SG", "similarity"]
+floor_sims  = sim_df.loc[sim_df["condition"] == "dc_dx_dg", "similarity"]
+sgenre_sims = sim_df.loc[sim_df["condition"] == "dc_dx_SG", "similarity"]
+
+t, p, df_val, mean_diff, ci_low, ci_high = welch_t(cntx_sims, floor_sims)
+d                                        = cohens_d(cntx_sims, floor_sims)
+
+# Joint context + genre alignment vs baseline
+t_jt, p_jt, df_jt, md_jt, ci_lo_jt, ci_hi_jt = welch_t(joint_sims, floor_sims)
+d_jt = cohens_d(joint_sims, floor_sims)
+
+# Also compare same-genre vs dissimilarity floor (genre effect without context)
+t_sg, p_sg, df_sg, md_sg, ci_lo_sg, ci_hi_sg = welch_t(sgenre_sims, floor_sims)
+d_sg = cohens_d(sgenre_sims, floor_sims)
 
 print("RQ1 — CONTEXT EFFECT")
-print("=" * 60)
-print(f"  Dclip_Scontext         M = {cntx_sims.mean():.4f}  (N = {len(cntx_sims):,})")
-print(f"  Dclip_Dcontext_Dgenre  M = {baseline_sims.mean():.4f}  (N = {len(baseline_sims):,})")
-print(f"  Delta = {cntx_sims.mean() - baseline_sims.mean():+.4f}")
-print(f"  Welch's t({df_val:.1f}) = {t:.3f},  p = {p:.4f}  {sig_marker(p)}")
-print(f"  Cohen's d = {d:.3f}")
+print("=" * 65)
+print(f"  Dissimilarity floor (dc_dx_dg)           M = {floor_sims.mean():.4f}  (N = {len(floor_sims):,})") 
+print(f"  Same genre, diff all  (dc_dx_SG)         M = {sgenre_sims.mean():.4f} (N = {len(sgenre_sims):,})") 
+print(f"  Same context, diff clip+genre (dc_SX_dg) M = {cntx_sims.mean():.4f}   (N = {len(cntx_sims):,})") 
+print(f"  Same context+genre, diff clip (dc_SX_SG) M = {joint_sims.mean():.4f}  (N = {len(joint_sims):,})")
+
+print(f"\n  Pure context vs floor (dc_SX_dg vs dc_dx_dg):")
+print(f"    Mean diff = {mean_diff:+.4f},  95% CI [{ci_low:.4f}, {ci_high:.4f}]")
+print(f"    Welch's t({df_val:.1f}) = {t:.3f},  p = {p:.4f}  {sig_marker(p)}")
+print(f"    Cohen's d = {d:.3f}  [note: d benchmarks not appropriate for pairwise data]")
+
+print(f"\n  Joint context+genre alignment vs floor (dc_SX_SG vs dc_dx_dg):")
+print(f"    Mean diff = {md_jt:+.4f},  95% CI [{ci_lo_jt:.4f}, {ci_hi_jt:.4f}]")
+print(f"    Welch's t({df_jt:.1f}) = {t_jt:.3f},  p = {p_jt:.4f}  {sig_marker(p_jt)}")
+print(f"    Cohen's d = {d_jt:.3f}")
+
+print(f"\n  Same-genre vs floor — genre effect independent of context (dc_dx_SG vs dc_dx_dg):")
+print(f"    Mean diff = {md_sg:+.4f},  95% CI [{ci_lo_sg:.4f}, {ci_hi_sg:.4f}]")
+print(f"    Welch's t({df_sg:.1f}) = {t_sg:.3f},  p = {p_sg:.4f}  {sig_marker(p_sg)}")
+print(f"    Cohen's d = {d_sg:.3f}")
 
 rq1_context = dict(
-    mean_ctx=float(cntx_sims.mean()), mean_base=float(baseline_sims.mean()),
-    delta=float(cntx_sims.mean()-baseline_sims.mean()),
+    mean_ctx=float(cntx_sims.mean()),   mean_joint=float(joint_sims.mean()),
+    mean_base=float(floor_sims.mean()), mean_sgenre=float(sgenre_sims.mean()),
+    delta=float(cntx_sims.mean()-floor_sims.mean()),
+    mean_diff=mean_diff, ci_low=ci_low, ci_high=ci_high,
     t=t, df=df_val, p=p, sig=sig_marker(p), d=d,
-    n_ctx=len(cntx_sims), n_base=len(baseline_sims)
+    n_ctx=len(cntx_sims), n_base=len(floor_sims)
 )
 ```
 
 ### Visualisation
 
-```{python vis-rq1, echo=FALSE}
-# All four conditions including Sclip_Scontext (now available at individual level)
+```{python vis-rq1}
+#| echo: false
+
+# Condition order and display labels — updated throughout:
+# "Baseline" → "Dissimilarity Floor" (observed dc_dx_dg condition)
+# Added: dc_dx_SG (same genre, diff clip+context)
 rq1_conds = [
-    ("Dclip_Dcontext_Dgenre", "Baseline\n(All Diff)",          "#95a5a6"),
-    ("Dclip_Scontext",        "Same Context\n(Diff Clip)",     "#e74c3c"),
-    ("Sclip_Dcontext",        "Same Clip\n(Diff Context)",     "#3498db"),
-    ("Sclip_Scontext",        "Combined\n(Same Clip+Context)", "#9b59b6"),
+    ("dc_dx_dg", "Dissimilarity\nFloor\n(All Diff)", "#95a5a6"),
+    ("dc_dx_SG", "Same Genre\n(Diff Clip+Context)",  "#f39c12"),
+    ("dc_SX_dg", "Same Context\n(Diff Clip+Genre)",  "#e74c3c"),
+    ("dc_SX_SG", "Same Context_Genre\n(Diff Clip)",  "#e74c3c"),
+    ("SC_dx",    "Same Clip\n(Diff Context)",        "#3498db"),
+    ("SC_SX",    "Combined\n(Same Clip+Context)",    "#9b59b6"),
 ]
 present_rq1 = [(c, lbl, col) for c, lbl, col in rq1_conds
                if (sim_df["condition"] == c).any()]
 
-fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+# Save condition means for the R emmeans visualisation below
+cond_means_py = {
+    c: {
+        "mean": float(sim_df.loc[sim_df["condition"] == c, "similarity"].mean()),
+        "n":    int((sim_df["condition"] == c).sum()),
+        "label": lbl,
+        "colour": col,
+    }
+    for c, lbl, col in present_rq1
+}
 
-# Panel A: mean bars with 95% CI
-ax = axes[0]
-means_rq1, errs_rq1, lbls_rq1, cols_rq1 = [], [], [], []
-for cond, lbl, col in present_rq1:
-    g  = sim_df.loc[sim_df["condition"] == cond, "similarity"]
-    ci = stats.t.interval(0.95, len(g)-1, loc=g.mean(), scale=stats.sem(g))
-    means_rq1.append(g.mean())
-    errs_rq1.append((ci[1]-ci[0])/2)
-    lbls_rq1.append(lbl)
-    cols_rq1.append(col)
-
-ax.bar(range(len(means_rq1)), means_rq1, color=cols_rq1,
-       edgecolor="black", alpha=0.85)
-ax.errorbar(range(len(means_rq1)), means_rq1, yerr=errs_rq1,
-            fmt="none", ecolor="black", capsize=6, linewidth=2)
-ax.set_xticks(range(len(lbls_rq1)))
-ax.set_xticklabels(lbls_rq1, fontsize=10)
-ax.set_ylabel("Mean Cosine Similarity", fontsize=11)
-ax.set_title("A. Mean Similarity by Condition\n(95% CI error bars)",
-             fontsize=12, fontweight="bold")
-ax.grid(axis="y", alpha=0.3)
-if len(means_rq1) >= 2:
-    y_brack = max(means_rq1) + max(errs_rq1) + 0.01
-    ax.plot([0, 1], [y_brack, y_brack], "k-", linewidth=1.5)
-    ax.text(0.5, y_brack + 0.003, rq1_context["sig"],
-            ha="center", fontsize=11, fontweight="bold")
-
-# Panel B: violin distributions
-ax2 = axes[1]
+# Violin plot (Panel B) — kept in Python for distribution shape
+fig, ax2 = plt.subplots(figsize=(12, 6))
 plot_data = pd.concat([
     sim_df.loc[sim_df["condition"] == c, ["similarity"]].assign(label=lbl)
     for c, lbl, _ in present_rq1
@@ -860,97 +1305,305 @@ palette_v = {lbl: col for _, lbl, col in present_rq1}
 sns.violinplot(data=plot_data, x="label", y="similarity",
                order=order_v, hue="label", palette=palette_v,
                legend=False, inner="box", linewidth=1.5, ax=ax2)
+
+# Add permutation null reference line
+ax2.axhline(perm_results["perm_mean"], color="black", linestyle="--",
+            linewidth=1.5, alpha=0.7, label=f"Permutation null M={perm_results['perm_mean']:.3f}")
+ax2.fill_between([-0.5, len(present_rq1) - 0.5],
+                 perm_results["perm_ci_low"], perm_results["perm_ci_hi"],
+                 alpha=0.12, color="black", label="Permutation 95% CI")
+ax2.legend(fontsize=9, loc="upper left")
 ax2.set_xlabel("")
 ax2.set_ylabel("Cosine Similarity", fontsize=11)
-ax2.set_title("B. Similarity Distributions by Condition",
+ax2.set_title(f"Similarity Distributions by Condition  [{MODEL_SLUG}]\n"
+              "(Black dashed = permutation null; shaded = 95% permutation CI)",
               fontsize=12, fontweight="bold")
 ax2.grid(axis="y", alpha=0.3)
 
-plt.suptitle(f"RQ1: Does Context Shape MIMC Similarity?  [{MODEL_SLUG} — individual]",
-             fontsize=14, fontweight="bold")
 plt.tight_layout()
-plt.savefig(f"{output_dir}/RQ1_context_effect_{MODEL_SLUG}.png",
+plt.savefig(f"{output_dir}/RQ1_violin_{MODEL_SLUG}.png",
             dpi=300, bbox_inches="tight")
 plt.show()
+print("Saved violin plot")
 ```
 
 ---
 
-## RQ2 — Music or Context: Which Drives Greater Convergence?
+## RQ2 — Does Genre Moderate the Context Effect?
 
-**Logic**: `Sclip_Dcontext` (same clip, different contexts) isolates the music
-contribution; `Dclip_Scontext` (different clips, same context) isolates the context
-contribution. RQ2b tests whether aligning both factors (`Sclip_Scontext`) produces
+**Logic**: Two complementary tests. *Framing susceptibility*: per genre, how much
+does sharing a context label raise similarity above the dissimilarity floor?
+*Within-genre clip vs context dominance*: within each genre, does clip or context
+drive more convergence? Model 2 (context × genre interaction) is presented here
+as the model-based complement to these pairwise tests.
+
+### Framing Susceptibility by Genre
+
+```{python rq3-susceptibility}
+#| echo: false
+
+print("RQ2 — GENRE FRAMING SUSCEPTIBILITY")
+print("=" * 70)
+print("Framing gain = dc_SX_SG M  −  dc_dx_SG M  (per genre)")
+print("-" * 70)
+
+susceptibility_rows = []
+for genre in genre_list:
+    cntx_sims_g = sim_df.loc[
+        (sim_df["condition"] == "dc_SX_SG") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
+    if len(cntx_sims_g) == 0:
+        cntx_sims_g = sim_df.loc[
+            (sim_df["condition"] == "dc_SX_SG") &
+            ((sim_df["genre_i"] == genre) | (sim_df["genre_j"] == genre)), "similarity"]
+    baseline_g = sim_df.loc[
+        (sim_df["condition"] == "dc_dx_SG") &
+        (sim_df["genre_i"] == genre), "similarity"]
+
+    if len(cntx_sims_g) > 1 and len(baseline_g) > 1:
+        framing_gain = cntx_sims_g.mean() - baseline_g.mean()
+        t, p, df_val, mean_diff, ci_low, ci_high = welch_t(cntx_sims_g, baseline_g)
+        d            = cohens_d(cntx_sims_g, baseline_g)
+        susceptibility_rows.append(dict(
+            genre=genre,
+            context_driven_mean=cntx_sims_g.mean(),
+            baseline_mean=baseline_g.mean(),
+            framing_gain=framing_gain,
+            mean_diff=mean_diff, ci_low=ci_low, ci_high=ci_high,
+            t=t, df=df_val, p=p, d=d,
+            n_ctx=len(cntx_sims_g), n_base=len(baseline_g)
+        ))
+        print(f"  {genre.upper():14s}  Ctx M={cntx_sims_g.mean():.4f}  "
+              f"Base M={baseline_g.mean():.4f}  "
+              f"Gain={framing_gain:+.4f}  95% CI [{ci_low:.4f}, {ci_high:.4f}]  "
+              f"d={d:.3f}  p={p:.4f}")
+
+susceptibility_df = pd.DataFrame(susceptibility_rows)
+if len(susceptibility_df) > 0:
+    n_sus = len(susceptibility_df)
+    susceptibility_df["p_bonf"]   = (susceptibility_df["p"] * n_sus).clip(upper=1.0)
+    susceptibility_df["sig"]      = susceptibility_df["p"].apply(sig_marker)
+    susceptibility_df["sig_bonf"] = susceptibility_df["p_bonf"].apply(sig_marker)
+    susceptibility_df = susceptibility_df.sort_values("framing_gain", ascending=False)
+    print(f"\nGenres ranked by framing susceptibility (highest to lowest):")
+    for _, r in susceptibility_df.iterrows():
+        print(f"  {r['genre'].upper():14s}  Gain={r['framing_gain']:+.4f}  "
+              f"95% CI [{r['ci_low']:.4f}, {r['ci_high']:.4f}]  "
+              f"d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
+    susceptibility_df.to_csv(
+        f"{output_dir}/genre_framing_susceptibility_{MODEL_SLUG}.csv", index=False)
+    print(f"\nSaved genre framing susceptibility table")
+```
+
+### Within-Genre Clip vs Context Dominance
+
+```{python rq3-genre-moderator}
+#| echo: false
+
+print("RQ2 — WITHIN-GENRE CLIP vs CONTEXT DOMINANCE")
+print("=" * 70)
+print("Clip-driven:    SC_dx  (same clip, diff context, same genre)")
+print("Context-driven: dc_SX_SG  (diff clip, same context, same genre)")
+print("-" * 70)
+
+mod_rows = []
+for genre in genre_list:
+    clip_sims_g = sim_df.loc[
+        (sim_df["condition"] == "SC_dx") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
+    cntx_sims_g = sim_df.loc[
+        (sim_df["condition"] == "dc_SX_SG") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
+    if len(clip_sims_g) > 1 and len(cntx_sims_g) > 1:
+        t, p, df_val, mean_diff, ci_low, ci_high = welch_t(clip_sims_g, cntx_sims_g)
+        d            = cohens_d(clip_sims_g, cntx_sims_g)
+        dominant     = "CLIP" if clip_sims_g.mean() > cntx_sims_g.mean() else "CONTEXT"
+        mod_rows.append(dict(
+            genre=genre,
+            clip_mean=clip_sims_g.mean(), clip_sd=clip_sims_g.std(),
+            context_mean=cntx_sims_g.mean(), context_sd=cntx_sims_g.std(),
+            diff=clip_sims_g.mean()-cntx_sims_g.mean(),
+            mean_diff=mean_diff, ci_low=ci_low, ci_high=ci_high,
+            dominant=dominant,
+            t=t, df=df_val, p=p, d=d,
+            n_clip=len(clip_sims_g), n_context=len(cntx_sims_g)
+        ))
+        print(f"  {genre.upper():14s}  Clip M={clip_sims_g.mean():.4f}  "
+              f"Ctx M={cntx_sims_g.mean():.4f}  "
+              f"95% CI [{ci_low:.4f}, {ci_high:.4f}]  "
+              f"-> {dominant:7s} dominant  d={d:.3f}  p={p:.4f}")
+
+genre_mod_df = pd.DataFrame(mod_rows)
+if len(genre_mod_df) > 0:
+    n_mod = len(genre_mod_df)
+    genre_mod_df["p_bonf"]   = (genre_mod_df["p"] * n_mod).clip(upper=1.0)
+    genre_mod_df["sig"]      = genre_mod_df["p"].apply(sig_marker)
+    genre_mod_df["sig_bonf"] = genre_mod_df["p_bonf"].apply(sig_marker)
+    genre_mod_df.to_csv(
+        f"{output_dir}/genre_clip_vs_context_moderator_{MODEL_SLUG}.csv", index=False)
+    print(f"\nSaved within-genre clip vs context moderator table")
+```
+
+### Visualisation
+
+```{python vis-rq3}
+#| echo: false
+
+print(f"susceptibility_df rows: {len(susceptibility_df)}")
+print(f"genre_mod_df rows:      {len(genre_mod_df)}")
+print(f"genre_list:             {genre_list}")
+print(f"Conditions in sim_df:   {sim_df['condition'].unique().tolist()}")
+print(f"Genres in sim_df (genre_i): {sim_df['genre_i'].unique().tolist()}")
+
+# Check SC_dx same-genre pairs exist
+for genre in genre_list:
+    n_clip = len(sim_df.loc[
+        (sim_df["condition"] == "SC_dx") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre)])
+    n_ctx  = len(sim_df.loc[
+        (sim_df["condition"] == "dc_SX_SG") &
+        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre)])
+    print(f"  {genre}: SC_dx same-genre N={n_clip},  dc_SX_SG same-genre N={n_ctx}")
+
+if len(susceptibility_df) > 0 and len(genre_mod_df) > 0:
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+    ax = axes[0]
+    s  = susceptibility_df.sort_values("framing_gain", ascending=True)
+    colors = ["#e74c3c" if g > 0 else "#95a5a6" for g in s["framing_gain"]]
+    ax.barh(range(len(s)), s["framing_gain"], color=colors,
+            edgecolor="black", alpha=0.85)
+    ax.axvline(0, color="black", linewidth=1.5)
+    ax.set_yticks(range(len(s)))
+    ax.set_yticklabels(s["genre"].str.upper(), fontsize=11)
+    ax.set_xlabel("Framing Gain\n(dc_SX_SG − dc_dx_SG)", fontsize=10)
+    ax.set_title("A. Genre Framing Susceptibility\n(Higher = More Context-Sensitive)",
+                 fontsize=13, fontweight="bold")
+    for i, (_, row) in enumerate(s.iterrows()):
+        x_off = 0.002 if row["framing_gain"] >= 0 else -0.002
+        ha    = "left"  if row["framing_gain"] >= 0 else "right"
+        ax.text(row["framing_gain"] + x_off, i, row["sig_bonf"],
+                ha=ha, va="center", fontsize=10, fontweight="bold")
+    ax.grid(axis="x", alpha=0.3)
+
+    ax2 = axes[1]
+    s2  = genre_mod_df.sort_values("diff", ascending=True)
+    colors2 = ["#3498db" if d > 0 else "#e74c3c" for d in s2["diff"]]
+    ax2.barh(range(len(s2)), s2["diff"], color=colors2,
+             edgecolor="black", alpha=0.85)
+    ax2.axvline(0,     color="black", linewidth=1.5)
+    ax2.axvline( 0.05, color="gray",  linestyle="--", alpha=0.4)
+    ax2.axvline(-0.05, color="gray",  linestyle="--", alpha=0.4)
+    ax2.set_yticks(range(len(s2)))
+    ax2.set_yticklabels(s2["genre"].str.upper(), fontsize=11)
+    ax2.set_xlabel("Clip Mean − Context Mean\n(+ve = Clip dominant; −ve = Context dominant)",
+                   fontsize=10)
+    ax2.set_title("B. Clip vs Context Dominance by Genre\n(SC_dx vs dc_SX_SG)",
+                  fontsize=13, fontweight="bold")
+    for i, (_, row) in enumerate(s2.iterrows()):
+        x_off = 0.003 if row["diff"] >= 0 else -0.003
+        ha    = "left"  if row["diff"] >= 0 else "right"
+        ax2.text(row["diff"] + x_off, i, row["sig_bonf"],
+                 ha=ha, va="center", fontsize=10, fontweight="bold")
+    fig.legend(
+        handles=[Patch(facecolor="#3498db", label="Clip dominant"),
+                 Patch(facecolor="#e74c3c", label="Context dominant")],
+        loc="lower center", ncol=2, fontsize=10, bbox_to_anchor=(0.75, -0.06)
+    )
+    ax2.grid(axis="x", alpha=0.3)
+
+    plt.suptitle(f"RQ2: Does Genre Moderate the Context Effect?  [{MODEL_SLUG} — individual]",
+                 fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(f"{output_dir}/RQ2_genre_moderation_{MODEL_SLUG}.png",
+                dpi=300, bbox_inches="tight")
+    plt.show()
+    print("Saved: RQ2 genre moderation plot")
+```
+
+---
+
+## RQ3 — Does Music Clip or Context Drive Greater Convergence?
+
+**Logic**: `SC_dx` (same clip, different contexts) isolates the music
+contribution; `dc_SX_dg` (different clips, same context) isolates the context
+contribution. RQ3b tests whether aligning both factors (`SC_SX`) produces
 additional convergence beyond either alone — **this is the first pipeline in the
 chain where this test is available**, as individual-level data provides within-cell
 pairs across different participants.
 
 
-### Clip vs Context
+### Clip vs Context (RQ3a)
 
-```{python rq2-clip-vs-context, echo=FALSE}
-clip_sims = sim_df.loc[sim_df["condition"] == "Sclip_Dcontext", "similarity"]
-cntx_sims  = sim_df.loc[sim_df["condition"] == "Dclip_Scontext", "similarity"]
+```{python rq2-clip-vs-context}
+#| echo: false
 
-t, p, df_val = welch_t(clip_sims, cntx_sims)
-d            = cohens_d(clip_sims, cntx_sims)
+clip_sims = sim_df.loc[sim_df["condition"] == "SC_dx", "similarity"]
+cntx_sims  = sim_df.loc[sim_df["condition"] == "dc_SX_dg", "similarity"]
+
+t, p, df_val, mean_diff, ci_low, ci_high = welch_t(clip_sims, cntx_sims)
+d                                          = cohens_d(clip_sims, cntx_sims)
 
 rq2_primary = dict(
     mean_clip=float(clip_sims.mean()), mean_ctx=float(cntx_sims.mean()),
     diff=float(clip_sims.mean()-cntx_sims.mean()),
+    mean_diff=mean_diff, ci_low=ci_low, ci_high=ci_high,
     t=t, df=df_val, p=p, sig=sig_marker(p), d=d,
     n_clip=len(clip_sims), n_ctx=len(cntx_sims)
 )
 
-print("RQ2a — CLIP vs CONTEXT")
+print("RQ3a — CLIP vs CONTEXT")
 print("=" * 60)
-print(f"  Sclip_Dcontext (clip-driven):    M = {rq2_primary['mean_clip']:.4f}  "
+print(f"  SC_dx (clip-driven):    M = {rq2_primary['mean_clip']:.4f}  "
       f"(N = {rq2_primary['n_clip']:,})")
-print(f"  Dclip_Scontext (context-driven): M = {rq2_primary['mean_ctx']:.4f}  "
+print(f"  dc_SX_dg (context-driven): M = {rq2_primary['mean_ctx']:.4f}  "
       f"(N = {rq2_primary['n_ctx']:,})")
-print(f"  Delta (clip − context): {rq2_primary['diff']:+.4f}")
+print(f"  Mean difference = {mean_diff:+.4f},  95% CI [{ci_low:.4f}, {ci_high:.4f}]")
 print(f"  Welch's t({df_val:.1f}) = {t:.3f},  p = {p:.4f}  {sig_marker(p)}")
-print(f"  Cohen's d = {d:.3f}")
+print(f"  Cohen's d = {d:.3f}  [note: d benchmarks not appropriate for pairwise data]")
 dominant = "CLIP" if rq2_primary["diff"] > 0 else "CONTEXT"
 print(f"\n-> {dominant} drives greater MIMC similarity at the individual level")
 ```
 
-### RQ2b — Combined Advantage: Sclip_Scontext vs Single-Factor Conditions
+### RQ3b — Combined Advantage: SC_SX vs Single-Factor Conditions
 
-```{python rq2-combined, echo=FALSE}
-sc_sc = sim_df.loc[sim_df["condition"] == "Sclip_Scontext",  "similarity"]
-sc_dc = sim_df.loc[sim_df["condition"] == "Sclip_Dcontext",  "similarity"]
-dc_sc = sim_df.loc[sim_df["condition"] == "Dclip_Scontext",  "similarity"]
+```{python rq2-combined}
+#| echo: false
+
+sc_sc = sim_df.loc[sim_df["condition"] == "SC_SX",  "similarity"]
+sc_dc = sim_df.loc[sim_df["condition"] == "SC_dx",  "similarity"]
+dc_sc = sim_df.loc[sim_df["condition"] == "dc_SX_dg",  "similarity"]
 
 combined_comparisons = [
-    ("Sclip_Scontext vs Sclip_Dcontext",
+    ("SC_SX vs SC_dx",
      "Combined advantage over Clip-only",    sc_sc, sc_dc),
-    ("Sclip_Scontext vs Dclip_Scontext",
+    ("SC_SX vs dc_SX_dg",
      "Combined advantage over Context-only", sc_sc, dc_sc),
 ]
 
 n_comb = len(combined_comparisons)
-print("RQ2b — COMBINED ALIGNMENT ADVANTAGE")
+print("RQ3b — COMBINED ALIGNMENT ADVANTAGE")
 print("=" * 65)
-print(f"  Sclip_Scontext  M={sc_sc.mean():.4f}  SD={sc_sc.std():.4f}  N={len(sc_sc):,}")
-print(f"  Sclip_Dcontext  M={sc_dc.mean():.4f}  SD={sc_dc.std():.4f}  N={len(sc_dc):,}")
-print(f"  Dclip_Scontext  M={dc_sc.mean():.4f}  SD={dc_sc.std():.4f}  N={len(dc_sc):,}")
+print(f"  SC_SX  M={sc_sc.mean():.4f}  SD={sc_sc.std():.4f}  N={len(sc_sc):,}")
+print(f"  SC_dx  M={sc_dc.mean():.4f}  SD={sc_dc.std():.4f}  N={len(sc_dc):,}")
+print(f"  dc_SX_dg  M={dc_sc.mean():.4f}  SD={dc_sc.std():.4f}  N={len(dc_sc):,}")
 print(f"\nWelch's t-tests  (Bonferroni k={n_comb},  alpha_adj={0.05/n_comb:.4f})")
 print("-" * 65)
 
 combined_rows = []
 for label, description, g1, g2 in combined_comparisons:
-    t, p, df_val = welch_t(g1, g2)
+    t, p, df_val, mean_diff, ci_low, ci_high = welch_t(g1, g2)
     d            = cohens_d(g1, g2)
     p_bonf       = min(p * n_comb, 1.0)
     print(f"\n  {description}")
-    print(f"    Delta = {g1.mean()-g2.mean():+.4f}  "
-          f"Welch's t({df_val:.1f}) = {t:.3f}  "
+    print(f"    Mean diff = {mean_diff:+.4f},  95% CI [{ci_low:.4f}, {ci_high:.4f}]")
+    print(f"    Welch's t({df_val:.1f}) = {t:.3f}  "
           f"p = {p:.4f} {sig_marker(p)}  ->  "
           f"p_bonf = {p_bonf:.4f} {sig_marker(p_bonf)}  d = {d:.3f}")
     combined_rows.append(dict(
         comparison=label, description=description,
         mean_a=g1.mean(), mean_b=g2.mean(), delta=g1.mean()-g2.mean(),
+        mean_diff=mean_diff, ci_low=ci_low, ci_high=ci_high,
         t=t, df=df_val, p=p, p_bonf=p_bonf,
         sig=sig_marker(p), sig_bonf=sig_marker(p_bonf), d=d
     ))
@@ -963,7 +1616,9 @@ print(f"\nSaved combined advantage table")
 
 ### Visualisation
 
-```{python vis-rq2, echo=FALSE}
+```{python vis-rq2}
+#| echo: false
+
 fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 
 # Panel A: clip vs context
@@ -1001,9 +1656,9 @@ ax.grid(axis="y", alpha=0.3, linestyle="--")
 # Panel B: three-condition combined advantage bar
 ax2 = axes[1]
 three_conds = [
-    (sc_dc, "Clip-only\n(Sclip_Dcontext)",    "#3498db"),
-    (dc_sc, "Context-only\n(Dclip_Scontext)", "#e74c3c"),
-    (sc_sc, "Combined\n(Sclip_Scontext)",     "#9b59b6"),
+    (sc_dc, "Clip-only\n(SC_dx)",    "#3498db"),
+    (dc_sc, "Context-only\n(dc_SX_dg)", "#e74c3c"),
+    (sc_sc, "Combined\n(SC_SX)",     "#9b59b6"),
 ]
 m3 = [g.mean() for g, _, _ in three_conds]
 e3 = [(stats.t.interval(0.95, len(g)-1, loc=g.mean(), scale=stats.sem(g))[1] -
@@ -1037,178 +1692,12 @@ if len(combined_df) > 0:
              ha="center", fontsize=10, fontweight="bold")
     ax2.set_ylim([0, y_top2 + 0.05])
 
-plt.suptitle(f"RQ2: Does Music or Context Drive Greater Convergence?  [{MODEL_SLUG} — individual]",
+plt.suptitle(f"RQ3: Does Music or Context Drive Greater Convergence?  [{MODEL_SLUG} — individual]",
              fontsize=14, fontweight="bold")
 plt.tight_layout()
-plt.savefig(f"{output_dir}/RQ2_clip_vs_context_{MODEL_SLUG}.png",
+plt.savefig(f"{output_dir}/RQ3_clip_vs_context_{MODEL_SLUG}.png",
             dpi=300, bbox_inches="tight")
 plt.show()
-```
-
----
-
-## RQ3 — Does Genre Moderate the Context Effect?
-
-**Logic**: Two complementary tests. *Framing susceptibility*: per genre, how much
-does sharing a context label raise similarity above the dissimilarity floor?
-*Within-genre clip vs context dominance*: within each genre, does clip or context
-drive more convergence?
-
-### Framing Susceptibility by Genre
-
-```{python rq3-susceptibility, echo=FALSE}
-print("RQ3 — GENRE FRAMING SUSCEPTIBILITY")
-print("=" * 70)
-print("Framing gain = Dclip_Scontext M  −  Dclip_Dcontext_Dgenre M  (per genre)")
-print("-" * 70)
-
-susceptibility_rows = []
-for genre in genre_list:
-    cntx_sims_g = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Scontext") &
-        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
-    if len(cntx_sims_g) == 0:
-        cntx_sims_g = sim_df.loc[
-            (sim_df["condition"] == "Dclip_Scontext") &
-            ((sim_df["genre_i"] == genre) | (sim_df["genre_j"] == genre)), "similarity"]
-    baseline_g = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Dcontext_Dgenre") &
-        (sim_df["genre_i"] == genre), "similarity"]
-
-    if len(cntx_sims_g) > 1 and len(baseline_g) > 1:
-        framing_gain = cntx_sims_g.mean() - baseline_g.mean()
-        t, p, df_val = welch_t(cntx_sims_g, baseline_g)
-        d            = cohens_d(cntx_sims_g, baseline_g)
-        susceptibility_rows.append(dict(
-            genre=genre,
-            context_driven_mean=cntx_sims_g.mean(),
-            baseline_mean=baseline_g.mean(),
-            framing_gain=framing_gain,
-            t=t, df=df_val, p=p, d=d,
-            n_ctx=len(cntx_sims_g), n_base=len(baseline_g)
-        ))
-        print(f"  {genre.upper():14s}  Ctx M={cntx_sims_g.mean():.4f}  "
-              f"Base M={baseline_g.mean():.4f}  "
-              f"Gain={framing_gain:+.4f}  d={d:.3f}  p={p:.4f}")
-
-susceptibility_df = pd.DataFrame(susceptibility_rows)
-if len(susceptibility_df) > 0:
-    n_sus = len(susceptibility_df)
-    susceptibility_df["p_bonf"]   = (susceptibility_df["p"] * n_sus).clip(upper=1.0)
-    susceptibility_df["sig"]      = susceptibility_df["p"].apply(sig_marker)
-    susceptibility_df["sig_bonf"] = susceptibility_df["p_bonf"].apply(sig_marker)
-    susceptibility_df = susceptibility_df.sort_values("framing_gain", ascending=False)
-    print(f"\nGenres ranked by framing susceptibility (highest to lowest):")
-    for _, r in susceptibility_df.iterrows():
-        print(f"  {r['genre'].upper():14s}  Gain={r['framing_gain']:+.4f}  "
-              f"d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
-    susceptibility_df.to_csv(
-        f"{output_dir}/genre_framing_susceptibility_{MODEL_SLUG}.csv", index=False)
-    print(f"\nSaved genre framing susceptibility table")
-```
-
-### Within-Genre Clip vs Context Dominance
-
-```{python rq3-genre-moderator, echo=FALSE}
-print("RQ3 — WITHIN-GENRE CLIP vs CONTEXT DOMINANCE")
-print("=" * 70)
-print("Clip-driven:    Sclip_Dcontext  (same clip, diff context, same genre)")
-print("Context-driven: Dclip_Scontext  (diff clip, same context, same genre)")
-print("-" * 70)
-
-mod_rows = []
-for genre in genre_list:
-    clip_sims_g = sim_df.loc[
-        (sim_df["condition"] == "Sclip_Dcontext") &
-        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
-    cntx_sims_g = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Scontext") &
-        (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
-    if len(clip_sims_g) > 1 and len(cntx_sims_g) > 1:
-        t, p, df_val = welch_t(clip_sims_g, cntx_sims_g)
-        d            = cohens_d(clip_sims_g, cntx_sims_g)
-        dominant     = "CLIP" if clip_sims_g.mean() > cntx_sims_g.mean() else "CONTEXT"
-        mod_rows.append(dict(
-            genre=genre,
-            clip_mean=clip_sims_g.mean(), clip_sd=clip_sims_g.std(),
-            context_mean=cntx_sims_g.mean(), context_sd=cntx_sims_g.std(),
-            diff=clip_sims_g.mean()-cntx_sims_g.mean(),
-            dominant=dominant,
-            t=t, df=df_val, p=p, d=d,
-            n_clip=len(clip_sims_g), n_context=len(cntx_sims_g)
-        ))
-        print(f"  {genre.upper():14s}  Clip M={clip_sims_g.mean():.4f}  "
-              f"Ctx M={cntx_sims_g.mean():.4f}  "
-              f"-> {dominant:7s} dominant  d={d:.3f}  p={p:.4f}")
-
-genre_mod_df = pd.DataFrame(mod_rows)
-if len(genre_mod_df) > 0:
-    n_mod = len(genre_mod_df)
-    genre_mod_df["p_bonf"]   = (genre_mod_df["p"] * n_mod).clip(upper=1.0)
-    genre_mod_df["sig"]      = genre_mod_df["p"].apply(sig_marker)
-    genre_mod_df["sig_bonf"] = genre_mod_df["p_bonf"].apply(sig_marker)
-    genre_mod_df.to_csv(
-        f"{output_dir}/genre_clip_vs_context_moderator_{MODEL_SLUG}.csv", index=False)
-    print(f"\nSaved within-genre clip vs context moderator table")
-```
-
-### Visualisation
-
-```{python vis-rq3, echo=FALSE}
-if len(susceptibility_df) > 0 and len(genre_mod_df) > 0:
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-
-    ax = axes[0]
-    s  = susceptibility_df.sort_values("framing_gain", ascending=True)
-    colors = ["#e74c3c" if g > 0 else "#95a5a6" for g in s["framing_gain"]]
-    ax.barh(range(len(s)), s["framing_gain"], color=colors,
-            edgecolor="black", alpha=0.85)
-    ax.axvline(0, color="black", linewidth=1.5)
-    ax.set_yticks(range(len(s)))
-    ax.set_yticklabels(s["genre"].str.upper(), fontsize=11)
-    ax.set_xlabel("Framing Gain\n(Dclip_Scontext − Dclip_Dcontext_Dgenre)", fontsize=10)
-    ax.set_title("A. Genre Framing Susceptibility\n(Higher = More Context-Sensitive)",
-                 fontsize=13, fontweight="bold")
-    for i, (_, row) in enumerate(s.iterrows()):
-        x_off = 0.002 if row["framing_gain"] >= 0 else -0.002
-        ha    = "left"  if row["framing_gain"] >= 0 else "right"
-        ax.text(row["framing_gain"] + x_off, i, row["sig_bonf"],
-                ha=ha, va="center", fontsize=10, fontweight="bold")
-    ax.grid(axis="x", alpha=0.3)
-
-    ax2 = axes[1]
-    s2  = genre_mod_df.sort_values("diff", ascending=True)
-    colors2 = ["#3498db" if d > 0 else "#e74c3c" for d in s2["diff"]]
-    ax2.barh(range(len(s2)), s2["diff"], color=colors2,
-             edgecolor="black", alpha=0.85)
-    ax2.axvline(0,     color="black", linewidth=1.5)
-    ax2.axvline( 0.05, color="gray",  linestyle="--", alpha=0.4)
-    ax2.axvline(-0.05, color="gray",  linestyle="--", alpha=0.4)
-    ax2.set_yticks(range(len(s2)))
-    ax2.set_yticklabels(s2["genre"].str.upper(), fontsize=11)
-    ax2.set_xlabel("Clip Mean − Context Mean\n(+ve = Clip dominant; −ve = Context dominant)",
-                   fontsize=10)
-    ax2.set_title("B. Clip vs Context Dominance by Genre\n(Sclip_Dcontext vs Dclip_Scontext)",
-                  fontsize=13, fontweight="bold")
-    for i, (_, row) in enumerate(s2.iterrows()):
-        x_off = 0.003 if row["diff"] >= 0 else -0.003
-        ha    = "left"  if row["diff"] >= 0 else "right"
-        ax2.text(row["diff"] + x_off, i, row["sig_bonf"],
-                 ha=ha, va="center", fontsize=10, fontweight="bold")
-    fig.legend(
-        handles=[Patch(facecolor="#3498db", label="Clip dominant"),
-                 Patch(facecolor="#e74c3c", label="Context dominant")],
-        loc="lower center", ncol=2, fontsize=10, bbox_to_anchor=(0.75, -0.06)
-    )
-    ax2.grid(axis="x", alpha=0.3)
-
-    plt.suptitle(f"RQ3: Does Genre Moderate the Context Effect?  [{MODEL_SLUG} — individual]",
-                 fontsize=14, fontweight="bold")
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/RQ3_genre_moderation_{MODEL_SLUG}.png",
-                dpi=300, bbox_inches="tight")
-    plt.show()
-    print("Saved: RQ3 genre moderation plot")
 ```
 
 ---
@@ -1216,39 +1705,41 @@ if len(susceptibility_df) > 0 and len(genre_mod_df) > 0:
 ## Summary
 
 ```{python summary, echo=FALSE}
+#| echo: false
+
 print(f"SUMMARY OF FINDINGS  [{MODEL_SLUG} — individual level]")
 print("=" * 70)
 
-print(f"\nRQ1 — Context Effect (Dclip_Scontext vs Dclip_Dcontext_Dgenre):")
+print(f"\nRQ1 — Context Effect (dc_SX_dg vs dc_dx_dg dissimilarity floor):")
 print(f"  Context-driven M={rq1_context['mean_ctx']:.4f}  |  "
-      f"Baseline M={rq1_context['mean_base']:.4f}")
+      f"Dissimilarity floor M={rq1_context['mean_base']:.4f}")
 print(f"  Delta={rq1_context['delta']:+.4f}  "
       f"t({rq1_context['df']:.1f})={rq1_context['t']:.3f}  "
       f"p={rq1_context['p']:.4f}  {rq1_context['sig']}  "
       f"d={rq1_context['d']:.3f}")
 
-print(f"\nRQ2a — Clip vs Context (Sclip_Dcontext vs Dclip_Scontext):")
-print(f"  Clip M={rq2_primary['mean_clip']:.4f}  |  Ctx M={rq2_primary['mean_ctx']:.4f}")
-dominant = "CLIP" if rq2_primary["diff"] > 0 else "CONTEXT"
-print(f"  Delta={rq2_primary['diff']:+.4f}  {dominant} dominant  "
-      f"d={rq2_primary['d']:.3f}  {rq2_primary['sig']}")
-
-print(f"\nRQ2b — Combined Advantage (Sclip_Scontext vs single-factor conditions):")
-for _, r in combined_df.iterrows():
-    print(f"  {r['description']}")
-    print(f"    Delta={r['delta']:+.4f}  d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
-
+print(f"\nRQ2 — Genre Framing Susceptibility (ranked highest to lowest):")
 if len(susceptibility_df) > 0:
-    print(f"\nRQ3 — Genre Framing Susceptibility (ranked highest to lowest):")
     for _, r in susceptibility_df.iterrows():
         print(f"  {r['genre'].upper():14s}  Gain={r['framing_gain']:+.4f}  "
               f"d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
 
 if len(genre_mod_df) > 0:
-    print(f"\nRQ3 — Within-Genre Clip vs Context Dominance:")
+    print(f"\nRQ2 — Within-Genre Clip vs Context Dominance:")
     for _, r in genre_mod_df.iterrows():
         print(f"  {r['genre'].upper():14s}  -> {r['dominant']:7s} dominant  "
               f"d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
+
+print(f"\nRQ3a — Clip vs Context (SC_dx vs dc_SX_dg):")
+print(f"  Clip M={rq2_primary['mean_clip']:.4f}  |  Ctx M={rq2_primary['mean_ctx']:.4f}")
+dominant = "CLIP" if rq2_primary["diff"] > 0 else "CONTEXT"
+print(f"  Delta={rq2_primary['diff']:+.4f}  {dominant} dominant  "
+      f"d={rq2_primary['d']:.3f}  {rq2_primary['sig']}")
+
+print(f"\nRQ3b — Combined Advantage (SC_SX vs single-factor conditions):")
+for _, r in combined_df.iterrows():
+    print(f"  {r['description']}")
+    print(f"    Delta={r['delta']:+.4f}  d={r['d']:.3f}  sig_bonf={r['sig_bonf']}")
 ```
 
 ---
@@ -1264,24 +1755,27 @@ if len(genre_mod_df) > 0:
 Tests whether specific context labels or genres differ from each other in how much
 convergence they produce. Descriptive characterisation only.
 
-```{python exploratory-pairwise, echo=FALSE}
+```{python exploratory-pairwise}
+#| echo: false
+
 print("PAIRWISE CONTEXT COMPARISONS  (Bonferroni corrected)")
 print("-" * 70)
 
 cntx_pairs = []
 for c1, c2 in combinations(cntx_list, 2):
     g1 = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["condition"] == "dc_SX_dg") &
         (sim_df["context_i"] == c1) & (sim_df["context_j"] == c1), "similarity"]
     g2 = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["condition"] == "dc_SX_dg") &
         (sim_df["context_i"] == c2) & (sim_df["context_j"] == c2), "similarity"]
     if len(g1) > 1 and len(g2) > 1:
-        t, p, df_val = welch_t(g1, g2)
+        t, p, df_val, mean_diff, ci_low, ci_high = welch_t(g1, g2)
         d = cohens_d(g1, g2)
         cntx_pairs.append(dict(context1=c1, context2=c2,
                                mean1=g1.mean(), mean2=g2.mean(),
                                diff=g1.mean()-g2.mean(),
+                               mean_diff=mean_diff, ci_low=ci_low, ci_high=ci_high,
                                t=t, df=df_val, p=p, d=d,
                                n1=len(g1), n2=len(g2)))
 
@@ -1302,17 +1796,18 @@ print("-" * 70)
 genre_pairs = []
 for g1_lbl, g2_lbl in combinations(genre_list, 2):
     s1 = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Dcontext_Sgenre") &
+        (sim_df["condition"] == "dc_dx_SG") &
         (sim_df["genre_i"] == g1_lbl) & (sim_df["genre_j"] == g1_lbl), "similarity"]
     s2 = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Dcontext_Sgenre") &
+        (sim_df["condition"] == "dc_dx_SG") &
         (sim_df["genre_i"] == g2_lbl) & (sim_df["genre_j"] == g2_lbl), "similarity"]
     if len(s1) > 1 and len(s2) > 1:
-        t, p, df_val = welch_t(s1, s2)
+        t, p, df_val, mean_diff, ci_low, ci_high = welch_t(s1, s2)
         d = cohens_d(s1, s2)
         genre_pairs.append(dict(genre1=g1_lbl, genre2=g2_lbl,
                                  mean1=s1.mean(), mean2=s2.mean(),
                                  diff=s1.mean()-s2.mean(),
+                                 mean_diff=mean_diff, ci_low=ci_low, ci_high=ci_high,
                                  t=t, df=df_val, p=p, d=d,
                                  n1=len(s1), n2=len(s2)))
 
@@ -1332,11 +1827,13 @@ if len(genre_pairs_df) > 0:
 
 Full within/between similarity for context and genre.
 
-```{python exploratory-similarity-matrices, echo=FALSE}
+```{python exploratory-similarity-matrices}
+#| echo: false
+
 cntx_within_exp = []
 for ctx in cntx_list:
     sims = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Scontext") &
+        (sim_df["condition"] == "dc_SX_dg") &
         (sim_df["context_i"] == ctx) & (sim_df["context_j"] == ctx), "similarity"]
     if len(sims) > 0:
         cntx_within_exp.append(dict(context=ctx, mean=sims.mean()))
@@ -1345,7 +1842,7 @@ context_within_df = pd.DataFrame(cntx_within_exp)
 genre_within_exp = []
 for genre in genre_list:
     sims = sim_df.loc[
-        (sim_df["condition"] == "Dclip_Dcontext_Sgenre") &
+        (sim_df["condition"] == "dc_dx_SG") &
         (sim_df["genre_i"] == genre) & (sim_df["genre_j"] == genre), "similarity"]
     if len(sims) > 0:
         genre_within_exp.append(dict(genre=genre, mean=sims.mean()))
@@ -1394,7 +1891,9 @@ t-SNE of the sentence embedding space coloured by genre and context. At the
 individual level this also reveals whether within-cell responses (same participant
 condition) cluster together.
 
-```{python exploratory-tsne, echo=FALSE}
+```{python exploratory-tsne}
+#| echo: false
+
 n_svd = min(50, embeddings.shape[1] - 1)
 svd   = TruncatedSVD(n_components=n_svd, random_state=42)
 X_svd = svd.fit_transform(embeddings)
@@ -1408,6 +1907,8 @@ try:
 except TypeError:
     tsne = TSNE(n_components=2, perplexity=perp, n_iter=1000,
                 random_state=42, init="pca", learning_rate="auto")
+                
+print(perp)
 
 X_2d = tsne.fit_transform(X_svd)
 
