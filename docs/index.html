@@ -5,566 +5,517 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Framed Listening — Analysis Documentation</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --border: rgba(0,0,0,0.1);
+  --border-soft: rgba(0,0,0,0.06);
+  --text: #1a1a18;
+  --muted: #6b6b68;
+  --accent: #3C3489;
+  --accent-light: #EEEDFE;
+  --accent-mid: #7F77DD;
+  --teal: #0F6E56;
+  --teal-light: #E1F5EE;
+  --coral: #993C1D;
+  --coral-light: #FAECE7;
+  --green: #3B6D11;
+  --green-light: #EAF3DE;
+  --amber: #854F0B;
+  --amber-light: #FAEEDA;
+  --sidebar: 240px;
+  --toc: 220px;
+  --header: 80px;
+  --font: Georgia, 'Times New Roman', serif;
+  --mono: 'Courier New', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #fafaf8;
-    --surface: #ffffff;
-    --border: rgba(0,0,0,0.1);
-    --border-soft: rgba(0,0,0,0.06);
-    --text: #1a1a18;
-    --muted: #6b6b68;
-    --accent: #3C3489;
-    --accent-light: #EEEDFE;
+    --bg: #1a1a18;
+    --surface: #252523;
+    --border: rgba(255,255,255,0.1);
+    --border-soft: rgba(255,255,255,0.05);
+    --text: #e8e8e4;
+    --muted: #999992;
+    --accent: #AFA9EC;
+    --accent-light: #26215C;
     --accent-mid: #7F77DD;
-    --teal: #0F6E56;
-    --teal-light: #E1F5EE;
-    --teal-mid: #1D9E75;
-    --coral: #993C1D;
-    --coral-light: #FAECE7;
-    --green: #3B6D11;
-    --green-light: #EAF3DE;
-    --amber: #854F0B;
-    --amber-light: #FAEEDA;
-    --font: 'Georgia', 'Times New Roman', serif;
-    --mono: 'Courier New', monospace;
+    --teal: #5DCAA5;
+    --teal-light: #04342C;
+    --coral: #F0997B;
+    --coral-light: #4A1B0C;
+    --green: #97C459;
+    --green-light: #173404;
+    --amber: #FAC775;
+    --amber-light: #412402;
   }
+}
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #1a1a18;
-      --surface: #252523;
-      --border: rgba(255,255,255,0.1);
-      --border-soft: rgba(255,255,255,0.05);
-      --text: #e8e8e4;
-      --muted: #999992;
-      --accent: #AFA9EC;
-      --accent-light: #26215C;
-      --accent-mid: #7F77DD;
-      --teal: #5DCAA5;
-      --teal-light: #04342C;
-      --teal-mid: #1D9E75;
-      --coral: #F0997B;
-      --coral-light: #4A1B0C;
-      --green: #97C459;
-      --green-light: #173404;
-      --amber: #FAC775;
-      --amber-light: #412402;
-    }
-  }
+html, body { height: 100%; overflow: hidden; }
 
-  body {
-    font-family: var(--font);
-    background: var(--bg);
-    color: var(--text);
-    font-size: 15px;
-    line-height: 1.6;
-  }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+}
 
-  header {
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    padding: 2rem 2.5rem 1.5rem;
-  }
+/* ── Header ── */
+header {
+  height: var(--header);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
 
-  .header-eyebrow {
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-family: 'Courier New', monospace;
-    margin-bottom: 0.4rem;
-  }
+.header-title-block { flex: 1; min-width: 0; }
 
-  header h1 {
-    font-size: 22px;
-    font-weight: normal;
-    color: var(--text);
-    margin-bottom: 0.3rem;
-  }
+.header-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-bottom: 2px;
+}
 
-  header p {
-    font-size: 13px;
-    color: var(--muted);
-  }
+header h1 {
+  font-size: 16px;
+  font-weight: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-  .layout {
-    display: flex;
-    min-height: calc(100vh - 110px);
-  }
+header p {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
 
-  nav {
-    width: 220px;
-    flex-shrink: 0;
-    border-right: 1px solid var(--border);
-    background: var(--surface);
-    padding: 1.5rem 0;
-    position: sticky;
-    top: 0;
-    height: calc(100vh - 110px);
-    overflow-y: auto;
-  }
+/* ── Tab strip ── */
+.tab-strip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
 
-  nav .nav-label {
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-family: var(--mono);
-    padding: 0 1.25rem 0.5rem;
-    margin-top: 0.75rem;
-  }
+.tab-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
 
-  nav button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    padding: 0.5rem 1.25rem;
-    font-size: 13px;
-    font-family: var(--font);
-    color: var(--muted);
-    cursor: pointer;
-    border-left: 2px solid transparent;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
-    line-height: 1.4;
-  }
+.tab-btn:hover { color: var(--text); border-color: var(--border); }
 
-  nav button:hover {
-    color: var(--text);
-    background: rgba(0,0,0,0.03);
-  }
+.tab-btn.active {
+  color: var(--accent);
+  background: var(--accent-light);
+  border-color: var(--accent-mid);
+  font-weight: 500;
+}
 
-  nav button.active {
-    color: var(--accent);
-    border-left-color: var(--accent-mid);
-    background: var(--accent-light);
-    font-weight: 500;
-  }
+/* ── Body layout ── */
+.body-layout {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
 
-  @media (prefers-color-scheme: dark) {
-    nav button:hover { background: rgba(255,255,255,0.05); }
-  }
+/* ── TOC sidebar ── */
+.toc-sidebar {
+  width: var(--toc);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
-  .main {
-    flex: 1;
-    padding: 2rem 2.5rem;
-    max-width: 900px;
-  }
+.toc-search {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
-  .search-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 2rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.5rem 0.75rem;
-  }
+.toc-search svg { color: var(--muted); flex-shrink: 0; }
 
-  .search-bar svg {
-    color: var(--muted);
-    flex-shrink: 0;
-  }
+.toc-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text);
+  outline: none;
+  min-width: 0;
+}
 
-  .search-bar input {
-    flex: 1;
-    border: none;
-    background: transparent;
-    font-size: 14px;
-    font-family: var(--font);
-    color: var(--text);
-    outline: none;
-  }
+.toc-search input::placeholder { color: var(--muted); }
 
-  .search-bar input::placeholder { color: var(--muted); }
+.toc-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0 16px;
+}
 
-  #search-count {
-    font-size: 11px;
-    font-family: var(--mono);
-    color: var(--muted);
-    white-space: nowrap;
-  }
+.toc-group-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: var(--mono);
+  padding: 10px 12px 4px;
+  opacity: 0.7;
+}
 
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
+.toc-link {
+  display: block;
+  padding: 3px 12px;
+  font-size: 11.5px;
+  font-family: var(--font);
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
 
-  .panel-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 1.5rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-soft);
-    gap: 1rem;
-  }
+.toc-link:hover {
+  color: var(--text);
+  background: rgba(0,0,0,0.03);
+}
 
-  .panel-title { font-size: 18px; font-weight: normal; }
-  .panel-subtitle { font-size: 13px; color: var(--muted); margin-top: 0.2rem; }
+.toc-link.active {
+  color: var(--accent);
+  border-left-color: var(--accent-mid);
+}
 
-  .open-btn {
-    flex-shrink: 0;
-    padding: 0.4rem 0.9rem;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-size: 12px;
-    font-family: var(--font);
-    color: var(--muted);
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    transition: border-color 0.15s, color 0.15s;
-  }
+.toc-link.depth-1 { padding-left: 22px; font-size: 11px; }
+.toc-link.depth-2 { padding-left: 32px; font-size: 10.5px; }
 
-  .open-btn:hover { color: var(--accent); border-color: var(--accent-mid); }
+.toc-link.hidden { display: none; }
 
-  .toc-section {
-    margin-bottom: 2rem;
-  }
+.tag {
+  display: inline-block;
+  font-size: 9px;
+  font-family: var(--mono);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 
-  .toc-section h3 {
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-family: var(--mono);
-    font-weight: normal;
-    margin-bottom: 0.6rem;
-  }
+.t-purple { background: var(--accent-light); color: var(--accent); }
+.t-teal   { background: var(--teal-light);   color: var(--teal); }
+.t-coral  { background: var(--coral-light);  color: var(--coral); }
+.t-green  { background: var(--green-light);  color: var(--green); }
+.t-amber  { background: var(--amber-light);  color: var(--amber); }
 
-  .toc-list { list-style: none; }
+.no-results {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 12px;
+  display: none;
+  font-style: italic;
+}
 
-  .toc-item {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    padding: 0.25rem 0;
-    border-bottom: 1px solid var(--border-soft);
-  }
+/* ── iframe area ── */
+.iframe-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
 
-  .toc-item:last-child { border-bottom: none; }
+iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: none;
+  background: var(--bg);
+}
 
-  .toc-depth-0 { font-size: 14px; font-weight: 500; }
-  .toc-depth-1 { font-size: 13px; padding-left: 1rem; }
-  .toc-depth-2 { font-size: 12px; padding-left: 2rem; color: var(--muted); }
-
-  .toc-item a {
-    color: inherit;
-    text-decoration: none;
-    transition: color 0.1s;
-  }
-
-  .toc-item a:hover { color: var(--accent); }
-
-  .toc-item.hidden { display: none; }
-
-  .tag {
-    font-size: 10px;
-    font-family: var(--mono);
-    padding: 1px 6px;
-    border-radius: 3px;
-    white-space: nowrap;
-    margin-left: auto;
-  }
-
-  .badge-purple { background: var(--accent-light); color: var(--accent); }
-  .badge-teal { background: var(--teal-light); color: var(--teal); }
-  .badge-coral { background: var(--coral-light); color: var(--coral); }
-  .badge-green { background: var(--green-light); color: var(--green); }
-  .badge-amber { background: var(--amber-light); color: var(--amber); }
-
-  .no-results {
-    font-size: 13px;
-    color: var(--muted);
-    padding: 2rem 0;
-    display: none;
-  }
+iframe.active { display: block; }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="header-eyebrow">context-framed-listening / docs</div>
-  <h1>Framed Listening — Analysis Documentation</h1>
-  <p>van der Walle, H. A. &nbsp;·&nbsp; Durham University Music Psychology &nbsp;·&nbsp; 2026</p>
+  <div class="header-title-block">
+    <div class="header-eyebrow">context-framed-listening / docs</div>
+    <h1>Framed Listening — Analysis Documentation</h1>
+    <p>van der Walle, H. A. &nbsp;·&nbsp; Durham University Music Psychology &nbsp;·&nbsp; 2026</p>
+  </div>
+
+  <div class="tab-strip">
+    <button class="tab-btn active" onclick="switchTab('text-prep', this)">Text Prep</button>
+    <button class="tab-btn" onclick="switchTab('model-comparison', this)">Model Comparison</button>
+    <button class="tab-btn" onclick="switchTab('semb', this)">Sentence Embeddings</button>
+    <button class="tab-btn" onclick="switchTab('tfidf', this)">TF-IDF</button>
+  </div>
 </header>
 
-<div class="layout">
+<div class="body-layout">
 
-  <nav id="sidebar">
-    <div class="nav-label">Notebooks</div>
-    <button class="active" onclick="switchTab('text-prep', this)">Text Prep</button>
-    <button onclick="switchTab('model-comparison', this)">Model Comparison</button>
-    <button onclick="switchTab('semb', this)">Sentence Embeddings</button>
-    <button onclick="switchTab('tfidf', this)">TF-IDF</button>
-  </nav>
-
-  <main class="main">
-
-    <div class="search-bar">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+  <!-- TOC sidebar -->
+  <aside class="toc-sidebar">
+    <div class="toc-search">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
       </svg>
       <input type="text" id="search-input" placeholder="Search sections…" oninput="filterTOC(this.value)" autocomplete="off">
-      <span id="search-count"></span>
     </div>
 
-    <!-- TEXT PREP -->
-    <div class="tab-panel active" id="panel-text-prep">
-      <div class="panel-header">
-        <div>
-          <div class="panel-title">Descriptive Stats &amp; Text Preprocessing</div>
-          <div class="panel-subtitle">Spell checking · stop words · lemmatisation · combined MIMC construction</div>
-        </div>
-        <a class="open-btn" href="text-prep.html" target="_blank">
-          Open notebook
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
+    <div class="toc-scroll" id="toc-scroll">
+
+      <!-- TEXT PREP TOC -->
+      <div class="toc-panel" id="toc-text-prep">
+        <div class="toc-group-label">Setup</div>
+        <a class="toc-link depth-0" data-anchor="setup">Setup</a>
+        <a class="toc-link depth-1" data-anchor="descriptive-stats-before-splitting-mimc-trials">Descriptive stats before splitting trials</a>
+
+        <div class="toc-group-label">Descriptive Statistics</div>
+        <a class="toc-link depth-0" data-anchor="descriptive-statistics">Descriptive Statistics</a>
+        <a class="toc-link depth-1" data-anchor="mimc-description-word-counts">MIMC description word counts</a>
+
+        <div class="toc-group-label">Text Preprocessing</div>
+        <a class="toc-link depth-0" data-anchor="text-preprocessing">Text Preprocessing</a>
+        <a class="toc-link depth-1" data-anchor="spell-checking">Spell checking <span class="tag t-amber">NLP</span></a>
+        <a class="toc-link depth-1" data-anchor="stop-words">Stop words <span class="tag t-amber">NLP</span></a>
+        <a class="toc-link depth-1" data-anchor="lemmatise">Lemmatise <span class="tag t-amber">NLP</span></a>
+        <a class="toc-link depth-1" data-anchor="apply-text-preprocessing">Apply text preprocessing</a>
+        <a class="toc-link depth-0" data-anchor="creating-combined-combmimc">Creating combined combMIMC <span class="tag t-purple">output</span></a>
       </div>
 
-      <div class="toc-section">
-        <h3>Setup</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="text-prep.html#setup" target="_blank">Setup</a><span class="tag badge-purple">Python</span></li>
-        </ul>
+      <!-- MODEL COMPARISON TOC -->
+      <div class="toc-panel" id="toc-model-comparison" style="display:none">
+        <div class="toc-group-label">Setup</div>
+        <a class="toc-link depth-0" data-anchor="setup">Setup <span class="tag t-purple">Python</span></a>
+        <a class="toc-link depth-1" data-anchor="load-data">Load Data</a>
+        <a class="toc-link depth-1" data-anchor="helper-functions">Helper Functions</a>
+
+        <div class="toc-group-label">Group A — Aggregated combMIMC (N = 64)</div>
+        <a class="toc-link depth-1" data-anchor="a1-tf-idf">A1 — TF-IDF <span class="tag t-amber">TF-IDF</span></a>
+        <a class="toc-link depth-1" data-anchor="a2-word2vec-lvl2a">A2 — Word2Vec (lvl2a) <span class="tag t-teal">W2V</span></a>
+        <a class="toc-link depth-1" data-anchor="a3-word2vec-lvl1a">A3 — Word2Vec (lvl1a) <span class="tag t-teal">W2V</span></a>
+        <a class="toc-link depth-1" data-anchor="a4-bert">A4 — BERT <span class="tag t-purple">BERT</span></a>
+        <a class="toc-link depth-1" data-anchor="a5-bertweet">A5 — BERTweet <span class="tag t-purple">BERT</span></a>
+        <a class="toc-link depth-1" data-anchor="a6-paraphrase-minilm-l6-v2">A6 — paraphrase-MiniLM-L6-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-1" data-anchor="a7-all-minilm-l6-v2">A7 — all-MiniLM-L6-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-1" data-anchor="a8-all-mpnet-base-v2">A8 — all-mpnet-base-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-1" data-anchor="a9-paraphrase-mpnet-base-v2">A9 — paraphrase-mpnet-base-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-0" data-anchor="group-a-cross-model-comparison">Group A — Cross-Model Comparison <span class="tag t-teal">summary</span></a>
+
+        <div class="toc-group-label">Group B — Individual MIMC (N = all)</div>
+        <a class="toc-link depth-1" data-anchor="b1-tf-idf">B1 — TF-IDF <span class="tag t-amber">TF-IDF</span></a>
+        <a class="toc-link depth-1" data-anchor="b2-word2vec-lvl2a">B2 — Word2Vec (lvl2a) <span class="tag t-teal">W2V</span></a>
+        <a class="toc-link depth-1" data-anchor="b3-word2vec-lvl1a">B3 — Word2Vec (lvl1a) <span class="tag t-teal">W2V</span></a>
+        <a class="toc-link depth-1" data-anchor="b4-bert">B4 — BERT <span class="tag t-purple">BERT</span></a>
+        <a class="toc-link depth-1" data-anchor="b5-bertweet">B5 — BERTweet <span class="tag t-purple">BERT</span></a>
+        <a class="toc-link depth-1" data-anchor="b6-paraphrase-minilm-l6-v2">B6 — paraphrase-MiniLM-L6-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-1" data-anchor="b7-all-minilm-l6-v2">B7 — all-MiniLM-L6-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-1" data-anchor="b8-all-mpnet-base-v2">B8 — all-mpnet-base-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-1" data-anchor="b9-paraphrase-mpnet-base-v2">B9 — paraphrase-mpnet-base-v2 <span class="tag t-coral">SBERT</span></a>
+        <a class="toc-link depth-0" data-anchor="group-b-cross-model-comparison">Group B — Cross-Model Comparison <span class="tag t-teal">summary</span></a>
+        <a class="toc-link depth-0" data-anchor="summary">Summary</a>
       </div>
 
-      <div class="toc-section">
-        <h3>Descriptive Statistics</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="text-prep.html" target="_blank">Descriptive stats before splitting MIMC trials</a></li>
-          <li class="toc-item toc-depth-1"><a href="text-prep.html" target="_blank">Descriptive statistics</a><span class="tag badge-teal">stats</span></li>
-          <li class="toc-item toc-depth-1"><a href="text-prep.html" target="_blank">MIMC description word counts</a><span class="tag badge-teal">stats</span></li>
-        </ul>
+      <!-- SEMB TOC -->
+      <div class="toc-panel" id="toc-semb" style="display:none">
+        <div class="toc-group-label">Setup &amp; Data</div>
+        <a class="toc-link depth-0" data-anchor="setup">Setup <span class="tag t-purple">Python</span></a>
+        <a class="toc-link depth-0" data-anchor="data-preparation">Data Preparation</a>
+        <a class="toc-link depth-1" data-anchor="load-data">Load Data</a>
+        <a class="toc-link depth-1" data-anchor="sentence-embeddings">Sentence Embeddings <span class="tag t-purple">BERT</span></a>
+        <a class="toc-link depth-1" data-anchor="pairwise-similarity-by-condition">Pairwise Similarity by Condition <span class="tag t-teal">cosine</span></a>
+
+        <div class="toc-group-label">Linear Mixed Models</div>
+        <a class="toc-link depth-0" data-anchor="linear-mixed-models">Linear Mixed Models <span class="tag t-coral">LMM</span></a>
+        <a class="toc-link depth-1" data-anchor="lmm-setup-prep">LMM setup &amp; prep</a>
+        <a class="toc-link depth-1" data-anchor="lmm-models">LMM Models</a>
+        <a class="toc-link depth-1" data-anchor="supplementary-study-does-believability-moderate-the-context-effect">Supplementary Study — believability moderator <span class="tag t-amber">supp.</span></a>
+        <a class="toc-link depth-1" data-anchor="estimated-marginal-means">Estimated Marginal Means</a>
+
+        <div class="toc-group-label">Research Questions</div>
+        <a class="toc-link depth-0" data-anchor="rq1-does-context-shape-mimc-similarity">RQ1 — Context shape MIMC similarity? <span class="tag t-green">RQ1</span></a>
+        <a class="toc-link depth-1" data-anchor="omnibus-test">Omnibus Test</a>
+        <a class="toc-link depth-1" data-anchor="context-effect-dc_sx_dg-vs-dc_dx_dg">Context effect: dc_SX_dg vs dc_dx_dg</a>
+        <a class="toc-link depth-1" data-anchor="visualisation">Visualisation <span class="tag t-teal">plot</span></a>
+        <a class="toc-link depth-0" data-anchor="rq2-does-genre-moderate-the-context-effect">RQ2 — Genre moderate context effect? <span class="tag t-green">RQ2</span></a>
+        <a class="toc-link depth-1" data-anchor="framing-susceptibility-by-genre">Framing susceptibility by genre</a>
+        <a class="toc-link depth-1" data-anchor="within-genre-clip-vs-context-dominance">Within-genre clip vs context dominance</a>
+        <a class="toc-link depth-1" data-anchor="visualisation-1">Visualisation <span class="tag t-teal">plot</span></a>
+        <a class="toc-link depth-0" data-anchor="rq3-does-music-clip-or-context-drive-greater-convergence">RQ3 — Clip or context drives convergence? <span class="tag t-green">RQ3</span></a>
+        <a class="toc-link depth-1" data-anchor="clip-vs-context-rq3a">Clip vs Context (RQ3a)</a>
+        <a class="toc-link depth-1" data-anchor="rq3b-combined-advantage-sc_sx-vs-single-factor-conditions">RQ3b — Combined advantage SC_SX</a>
+        <a class="toc-link depth-1" data-anchor="visualisation-2">Visualisation <span class="tag t-teal">plot</span></a>
+
+        <div class="toc-group-label">Wrap-up</div>
+        <a class="toc-link depth-0" data-anchor="summary">Summary</a>
+        <a class="toc-link depth-0" data-anchor="exploratory-analyses">Exploratory Analyses</a>
+        <a class="toc-link depth-1" data-anchor="pairwise-context-and-genre-comparisons">Pairwise context &amp; genre comparisons</a>
+        <a class="toc-link depth-1" data-anchor="similarity-matrices">Similarity matrices</a>
+        <a class="toc-link depth-1" data-anchor="individual-level-t-sne">Individual-level t-SNE</a>
       </div>
 
-      <div class="toc-section">
-        <h3>Text Preprocessing</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="text-prep.html" target="_blank">Text preprocessing</a></li>
-          <li class="toc-item toc-depth-1"><a href="text-prep.html" target="_blank">Spell checking</a><span class="tag badge-amber">NLP</span></li>
-          <li class="toc-item toc-depth-1"><a href="text-prep.html" target="_blank">Stop words</a><span class="tag badge-amber">NLP</span></li>
-          <li class="toc-item toc-depth-1"><a href="text-prep.html" target="_blank">Lemmatise</a><span class="tag badge-amber">NLP</span></li>
-          <li class="toc-item toc-depth-1"><a href="text-prep.html" target="_blank">Apply text preprocessing</a><span class="tag badge-amber">NLP</span></li>
-          <li class="toc-item toc-depth-1"><a href="text-prep.html" target="_blank">Creating combined combMIMC</a><span class="tag badge-purple">output</span></li>
-        </ul>
+      <!-- TFIDF TOC -->
+      <div class="toc-panel" id="toc-tfidf" style="display:none">
+        <div class="toc-group-label">Setup &amp; Data</div>
+        <a class="toc-link depth-0" data-anchor="setup">Setup <span class="tag t-purple">Python</span></a>
+        <a class="toc-link depth-0" data-anchor="data-preparation">Data Preparation</a>
+        <a class="toc-link depth-1" data-anchor="load-data">Load Data</a>
+        <a class="toc-link depth-1" data-anchor="tf-idf-vectorisation">TF-IDF Vectorisation <span class="tag t-amber">TF-IDF</span></a>
+        <a class="toc-link depth-1" data-anchor="cosine-similarity-matrix">Cosine Similarity Matrix <span class="tag t-teal">cosine</span></a>
+        <a class="toc-link depth-1" data-anchor="extract-similarity-values-by-condition">Extract similarity values by condition</a>
+
+        <div class="toc-group-label">Linear Mixed Models</div>
+        <a class="toc-link depth-0" data-anchor="linear-mixed-models">Linear Mixed Models <span class="tag t-coral">LMM</span></a>
+        <a class="toc-link depth-1" data-anchor="lmm-setup-prep">LMM setup &amp; prep</a>
+        <a class="toc-link depth-1" data-anchor="lmm-models">LMM Models</a>
+        <a class="toc-link depth-1" data-anchor="estimated-marginal-means">Estimated Marginal Means</a>
+
+        <div class="toc-group-label">Research Questions</div>
+        <a class="toc-link depth-0" data-anchor="rq1-does-context-shape-mimc-similarity">RQ1 — Context shape MIMC similarity? <span class="tag t-green">RQ1</span></a>
+        <a class="toc-link depth-1" data-anchor="omnibus-test">Omnibus Test</a>
+        <a class="toc-link depth-1" data-anchor="context-effect-pure-isolation-dc_sx_dg-and-joint-alignment-dc_sx_sg">Context effect: dc_SX_dg &amp; dc_SX_SG</a>
+        <a class="toc-link depth-1" data-anchor="visualisation">Visualisation <span class="tag t-teal">plot</span></a>
+        <a class="toc-link depth-0" data-anchor="rq2-does-genre-moderate-the-context-effect">RQ2 — Genre moderate context effect? <span class="tag t-green">RQ2</span></a>
+        <a class="toc-link depth-1" data-anchor="framing-susceptibility-by-genre">Framing susceptibility by genre</a>
+        <a class="toc-link depth-1" data-anchor="within-genre-clip-vs-context-dominance">Within-genre clip vs context dominance</a>
+        <a class="toc-link depth-1" data-anchor="visualisation-1">Visualisation <span class="tag t-teal">plot</span></a>
+        <a class="toc-link depth-1" data-anchor="supplementary-study-does-believability-moderate-the-context-effect">Supplementary Study — believability moderator <span class="tag t-amber">supp.</span></a>
+        <a class="toc-link depth-0" data-anchor="rq3-does-music-clip-or-context-drive-greater-convergence">RQ3 — Clip or context drives convergence? <span class="tag t-green">RQ3</span></a>
+        <a class="toc-link depth-1" data-anchor="clip-vs-context-rq3a">Clip vs Context (RQ3a)</a>
+        <a class="toc-link depth-1" data-anchor="rq3b-combined-advantage-sc_sx-vs-single-factor-conditions">RQ3b — Combined advantage SC_SX</a>
+        <a class="toc-link depth-1" data-anchor="visualisation-2">Visualisation <span class="tag t-teal">plot</span></a>
+
+        <div class="toc-group-label">Wrap-up</div>
+        <a class="toc-link depth-0" data-anchor="summary">Summary</a>
+        <a class="toc-link depth-0" data-anchor="exploratory-analyses">Exploratory Analyses</a>
+        <a class="toc-link depth-1" data-anchor="word-clouds-by-genre-context">Word clouds by genre × context</a>
+        <a class="toc-link depth-1" data-anchor="pairwise-context-and-genre-comparisons">Pairwise context &amp; genre comparisons</a>
+        <a class="toc-link depth-1" data-anchor="similarity-matrices">Similarity matrices</a>
+        <a class="toc-link depth-1" data-anchor="document-level-t-sne">Document-level t-SNE</a>
       </div>
+
+      <p class="no-results" id="no-results">No sections match.</p>
     </div>
+  </aside>
 
-    <!-- MODEL COMPARISON -->
-    <div class="tab-panel" id="panel-model-comparison">
-      <div class="panel-header">
-        <div>
-          <div class="panel-title">NLP Model Comparison</div>
-          <div class="panel-subtitle">Top &amp; bottom semantic similarity pairs across TF-IDF, Word2Vec, BERT, BERTweet, and sentence transformer variants</div>
-        </div>
-        <a class="open-btn" href="model-comparison.html" target="_blank">
-          Open notebook
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
-      </div>
+  <!-- iframes -->
+  <div class="iframe-area">
+    <iframe id="iframe-text-prep"        class="active" src="text-prep.html"        title="Text Prep notebook"></iframe>
+    <iframe id="iframe-model-comparison"           src="model-comparison.html"      title="Model Comparison notebook"></iframe>
+    <iframe id="iframe-semb"                       src="SEmb-analysis.html"         title="Sentence Embeddings notebook"></iframe>
+    <iframe id="iframe-tfidf"                      src="TFIDF-analysis.html"        title="TF-IDF notebook"></iframe>
+  </div>
 
-      <div class="toc-section">
-        <h3>Setup</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="model-comparison.html#setup" target="_blank">Setup</a><span class="tag badge-purple">Python</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">Load data</a></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">Helper functions</a></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>Group A — Aggregated combMIMC (N = 64)</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A1 — TF-IDF</a><span class="tag badge-amber">TF-IDF</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A2 — Word2Vec (lvl2a)</a><span class="tag badge-teal">W2V</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A3 — Word2Vec (lvl1a)</a><span class="tag badge-teal">W2V</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A4 — BERT</a><span class="tag badge-purple">BERT</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A5 — BERTweet</a><span class="tag badge-purple">BERT</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A6 — paraphrase-MiniLM-L6-v2</a><span class="tag badge-coral">SBERT</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A7 — all-MiniLM-L6-v2</a><span class="tag badge-coral">SBERT</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A8 — all-mpnet-base-v2</a><span class="tag badge-coral">SBERT</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">A9 — paraphrase-mpnet-base-v2</a><span class="tag badge-coral">SBERT</span></li>
-          <li class="toc-item toc-depth-0"><a href="model-comparison.html" target="_blank">Group A — Cross-model comparison</a><span class="tag badge-teal">summary</span></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>Group B — Individual MIMC (N = all responses)</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">B1 — TF-IDF</a><span class="tag badge-amber">TF-IDF</span></li>
-          <li class="toc-item toc-depth-1"><a href="model-comparison.html" target="_blank">B2 — Word2Vec (lvl2a)</a><span class="tag badge-teal">W2V</span></li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- SEMB -->
-    <div class="tab-panel" id="panel-semb">
-      <div class="panel-header">
-        <div>
-          <div class="panel-title">Sentence Embedding Analyses</div>
-          <div class="panel-subtitle">Individual MIMC level · pairwise similarity · linear mixed models · RQ1 &amp; RQ2</div>
-        </div>
-        <a class="open-btn" href="SEmb-analysis.html" target="_blank">
-          Open notebook
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
-      </div>
-
-      <div class="toc-section">
-        <h3>Setup &amp; Data</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="SEmb-analysis.html#setup" target="_blank">Setup</a><span class="tag badge-purple">Python</span></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Helper functions</a></li>
-          <li class="toc-item toc-depth-0"><a href="SEmb-analysis.html" target="_blank">Data preparation</a></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Load data</a></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>Embeddings &amp; Similarity</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="SEmb-analysis.html" target="_blank">Sentence embeddings</a><span class="tag badge-purple">BERT</span></li>
-          <li class="toc-item toc-depth-0"><a href="SEmb-analysis.html" target="_blank">Pairwise similarity by condition</a><span class="tag badge-teal">cosine</span></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>Linear Mixed Models</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">LMM setup &amp; prep</a><span class="tag badge-coral">LMM</span></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">LMM models</a><span class="tag badge-coral">LMM</span></li>
-          <li class="toc-item toc-depth-0"><a href="SEmb-analysis.html" target="_blank">Supplementary study — believability moderator</a><span class="tag badge-amber">supp.</span></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Estimated marginal means</a></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>Research Questions</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="SEmb-analysis.html" target="_blank">RQ1 — Does context shape MIMC similarity?</a><span class="tag badge-green">RQ1</span></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Omnibus test</a></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Context effect: dc_SX_dg vs dc_dx_dg</a></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Visualisation</a><span class="tag badge-teal">plot</span></li>
-          <li class="toc-item toc-depth-0"><a href="SEmb-analysis.html" target="_blank">RQ2 — Does genre moderate the context effect?</a><span class="tag badge-green">RQ2</span></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Framing susceptibility by genre</a></li>
-          <li class="toc-item toc-depth-1"><a href="SEmb-analysis.html" target="_blank">Within-genre clip vs context dominance</a></li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- TFIDF -->
-    <div class="tab-panel" id="panel-tfidf">
-      <div class="panel-header">
-        <div>
-          <div class="panel-title">TF-IDF Analyses</div>
-          <div class="panel-subtitle">Vectorisation · cosine similarity · linear mixed models · RQ1 &amp; RQ2</div>
-        </div>
-        <a class="open-btn" href="TFIDF-analysis.html" target="_blank">
-          Open notebook
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
-      </div>
-
-      <div class="toc-section">
-        <h3>Setup &amp; Data</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="TFIDF-analysis.html#setup" target="_blank">Setup</a><span class="tag badge-purple">Python</span></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Helper functions</a></li>
-          <li class="toc-item toc-depth-0"><a href="TFIDF-analysis.html" target="_blank">Data preparation</a></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Load data</a></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>TF-IDF &amp; Similarity</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="TFIDF-analysis.html" target="_blank">TF-IDF vectorisation</a><span class="tag badge-amber">TF-IDF</span></li>
-          <li class="toc-item toc-depth-0"><a href="TFIDF-analysis.html" target="_blank">Cosine similarity matrix</a><span class="tag badge-teal">cosine</span></li>
-          <li class="toc-item toc-depth-0"><a href="TFIDF-analysis.html" target="_blank">Extract similarity values by condition</a></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>Linear Mixed Models</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">LMM setup &amp; prep</a><span class="tag badge-coral">LMM</span></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">LMM models</a><span class="tag badge-coral">LMM</span></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Estimated marginal means</a></li>
-        </ul>
-      </div>
-
-      <div class="toc-section">
-        <h3>Research Questions</h3>
-        <ul class="toc-list">
-          <li class="toc-item toc-depth-0"><a href="TFIDF-analysis.html" target="_blank">RQ1 — Does context shape MIMC similarity?</a><span class="tag badge-green">RQ1</span></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Omnibus test</a></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Context effect: pure isolation &amp; joint alignment</a></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Visualisation</a><span class="tag badge-teal">plot</span></li>
-          <li class="toc-item toc-depth-0"><a href="TFIDF-analysis.html" target="_blank">RQ2 — Does genre moderate the context effect?</a><span class="tag badge-green">RQ2</span></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Framing susceptibility by genre</a></li>
-          <li class="toc-item toc-depth-1"><a href="TFIDF-analysis.html" target="_blank">Within-genre clip vs context dominance</a></li>
-        </ul>
-      </div>
-    </div>
-
-    <p class="no-results" id="no-results">No sections match your search.</p>
-
-  </main>
 </div>
 
 <script>
-  const tabMap = {
-    'text-prep': 'panel-text-prep',
-    'model-comparison': 'panel-model-comparison',
-    'semb': 'panel-semb',
-    'tfidf': 'panel-tfidf'
-  };
+const tabs = {
+  'text-prep':        { toc: 'toc-text-prep',        iframe: 'iframe-text-prep' },
+  'model-comparison': { toc: 'toc-model-comparison',  iframe: 'iframe-model-comparison' },
+  'semb':             { toc: 'toc-semb',              iframe: 'iframe-semb' },
+  'tfidf':            { toc: 'toc-tfidf',             iframe: 'iframe-tfidf' }
+};
 
-  let activeTab = 'text-prep';
+let activeTab = 'text-prep';
 
-  function switchTab(tabKey, btn) {
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-    document.getElementById(tabMap[tabKey]).classList.add('active');
-    btn.classList.add('active');
-    activeTab = tabKey;
-    document.getElementById('search-input').value = '';
-    filterTOC('');
-  }
+function switchTab(key, btn) {
+  if (key === activeTab) return;
 
-  function filterTOC(query) {
-    const q = query.trim().toLowerCase();
-    const activePanel = document.getElementById(tabMap[activeTab]);
-    const items = activePanel.querySelectorAll('.toc-item');
-    let visible = 0;
+  // hide old
+  document.getElementById(tabs[activeTab].toc).style.display = 'none';
+  document.getElementById(tabs[activeTab].iframe).classList.remove('active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
 
-    items.forEach(item => {
-      const text = item.textContent.toLowerCase();
-      if (!q || text.includes(q)) {
-        item.classList.remove('hidden');
-        visible++;
-      } else {
-        item.classList.add('hidden');
-      }
-    });
+  // show new
+  activeTab = key;
+  document.getElementById(tabs[key].toc).style.display = 'block';
+  document.getElementById(tabs[key].iframe).classList.add('active');
+  btn.classList.add('active');
 
-    const countEl = document.getElementById('search-count');
-    const noResults = document.getElementById('no-results');
+  // clear search
+  document.getElementById('search-input').value = '';
+  filterTOC('');
+}
 
-    if (q) {
-      countEl.textContent = visible + ' result' + (visible !== 1 ? 's' : '');
-      noResults.style.display = visible === 0 ? 'block' : 'none';
-    } else {
-      countEl.textContent = '';
-      noResults.style.display = 'none';
+function navigateTo(anchor) {
+  const iframeEl = document.getElementById(tabs[activeTab].iframe);
+  // Use contentWindow to scroll to anchor — works same-origin (all local files)
+  try {
+    const target = iframeEl.contentDocument.getElementById(anchor) ||
+                   iframeEl.contentDocument.querySelector('[data-anchor-id="' + anchor + '"]');
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+  } catch(e) {
+    // fallback: reload with hash (handles cross-origin or not-yet-loaded case)
+    const src = iframeEl.src.split('#')[0];
+    iframeEl.src = src + '#' + anchor;
   }
+  // highlight active link
+  document.querySelectorAll('#' + tabs[activeTab].toc + ' .toc-link').forEach(l => {
+    l.classList.toggle('active', l.dataset.anchor === anchor);
+  });
+}
+
+// Wire up all toc links
+document.querySelectorAll('.toc-link[data-anchor]').forEach(link => {
+  link.addEventListener('click', () => navigateTo(link.dataset.anchor));
+});
+
+function filterTOC(q) {
+  q = q.trim().toLowerCase();
+  const panel = document.getElementById(tabs[activeTab].toc);
+  const links = panel.querySelectorAll('.toc-link');
+  let visible = 0;
+
+  links.forEach(link => {
+    const match = !q || link.textContent.toLowerCase().includes(q);
+    link.classList.toggle('hidden', !match);
+    if (match) visible++;
+  });
+
+  // show/hide group labels: hide a label if all links after it (until next label) are hidden
+  panel.querySelectorAll('.toc-group-label').forEach(label => {
+    let next = label.nextElementSibling;
+    let anyVisible = false;
+    while (next && !next.classList.contains('toc-group-label')) {
+      if (!next.classList.contains('hidden') && next.classList.contains('toc-link')) anyVisible = true;
+      next = next.nextElementSibling;
+    }
+    label.style.display = anyVisible ? '' : 'none';
+  });
+
+  document.getElementById('no-results').style.display = (q && visible === 0) ? 'block' : 'none';
+}
 </script>
 
 </body>
