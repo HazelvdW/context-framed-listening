@@ -4,6 +4,8 @@
 
 This repository contains all data, analysis code, and outputs for the *Framed Listening* project (Hazel A. van der Walle, PhD, Music, Durham University). The study investigates whether brief contextual framing cues — descriptions of the contextual situation in which a piece of music may be typically heard (e.g., *bar*, *concert*, *movie*, *video game*) — shape the semantic content of listeners' music-influenced mental content (MIMC), and whether this varies across musical genres.
 
+### https://hazelvdw.github.io/context-framed-listening/
+
 ---
 
 ## Study Overview
