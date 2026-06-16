@@ -6,6 +6,9 @@ This repository contains all data, analysis code, and outputs for the *Framed Li
 
 ### https://hazelvdw.github.io/context-framed-listening/
 
+**Read the preprint here:**
+> van der Walle, H. A., Margulis, E. H., Jakubowski, K. (2026). *Framed Listening: Can accompanying contextual cues shape Music-Influenced Mental Content?. _PsyArXiv_. https://doi.org/10.31234/osf.io/zup69_v1*.
+
 ---
 
 ## Study Overview
@@ -147,7 +150,7 @@ The Word2Vec model (~1.6 GB) and all sentence embeddings are cached locally on f
 
 If you use this code or data, please cite:
 
-> van der Walle, H. A. (in prep). *Framed Listening: How contextual framing cues shape music-influenced mental content*.
+> van der Walle, H. A., Margulis, E. H., Jakubowski, K. (2026). *Framed Listening: Can accompanying contextual cues shape Music-Influenced Mental Content?. _PsyArXiv_. https://doi.org/10.31234/osf.io/zup69_v1*.
 
 ---
 
