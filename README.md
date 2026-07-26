@@ -1,3 +1,6 @@
+**Read the preprint here:**
+> van der Walle, H. A., Margulis, E. H., Jakubowski, K. (2026). *Framed Listening: Can accompanying contextual cues shape Music-Influenced Mental Content?. _PsyArXiv_. https://doi.org/10.31234/osf.io/zup69_v1*.
+
 # Framed Listening
 
 **Does contextual framing shape what listeners think about while hearing music?**
@@ -5,9 +8,6 @@
 This repository contains all data, analysis code, and outputs for the *Framed Listening* project (Hazel A. van der Walle, PhD, Music, Durham University). The study investigates whether brief contextual framing cues — descriptions of the contextual situation in which a piece of music may be typically heard (e.g., *bar*, *concert*, *movie*, *video game*) — shape the semantic content of listeners' music-influenced mental content (MIMC), and whether this varies across musical genres.
 
 ### https://hazelvdw.github.io/context-framed-listening/
-
-**Read the preprint here:**
-> van der Walle, H. A., Margulis, E. H., Jakubowski, K. (2026). *Framed Listening: Can accompanying contextual cues shape Music-Influenced Mental Content?. _PsyArXiv_. https://doi.org/10.31234/osf.io/zup69_v1*.
 
 ---
 
